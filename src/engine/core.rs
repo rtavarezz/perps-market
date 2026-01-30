@@ -108,6 +108,11 @@ impl Engine {
         self.accounts.get_mut(&account_id)
     }
 
+    /// Iterate over all accounts.
+    pub fn accounts_iter(&self) -> impl Iterator<Item = (&AccountId, &Account)> {
+        self.accounts.iter()
+    }
+
     /// Deposit funds into an account.
     pub fn deposit(&mut self, account_id: AccountId, amount: Quote) -> Result<(), EngineError> {
         let account = self

@@ -7,7 +7,14 @@
 //! Core components include order book matching, market state management,
 //! position tracking with isolated margin, funding rate settlement,
 //! and liquidation detection.
+//!
+//! Additions: circuit breakers, auto deleveraging, stop loss and take
+//! profit orders, comprehensive stress testing, and solvency invariants.
+//! API service layer, price feed integration, liquidity
+//! abstractions, custody and deposit/withdrawal flows, settlement layer,
+//! and unified configuration management.
 
+// core trading modules
 pub mod account;
 pub mod engine;
 pub mod events;
@@ -20,7 +27,23 @@ pub mod order;
 pub mod position;
 pub mod types;
 
+// risk and safety modules
+pub mod adl;
+pub mod conditional;
+pub mod risk;
+
+// integration modules
+pub mod api;
+pub mod config;
+pub mod custody;
+pub mod liquidity;
+pub mod price_feed;
+pub mod settlement;
+
+// re exports for convenience
 pub use account::*;
+pub use adl::*;
+pub use conditional::*;
 pub use engine::*;
 pub use events::*;
 pub use funding::*;
@@ -30,4 +53,11 @@ pub use mark_price::*;
 pub use market::*;
 pub use order::*;
 pub use position::*;
+pub use risk::*;
 pub use types::*;
+pub use api::{EngineCommand, EngineQuery, ApiResponse, ApiError, ErrorCode};
+pub use config::{IntegrationConfig, MarketConfig as IntegrationMarketConfig, FeeConfig, Environment};
+pub use custody::{CustodyManager, DepositRequest, WithdrawalRequest, CollateralType};
+pub use liquidity::{LiquidityProvider, SharedPool, LiquidityRouter, LiquidityQuote};
+pub use price_feed::{PriceUpdate, PriceAggregator, TwapCalculator};
+pub use settlement::{SettlementManager, SettlementBatch, SettlementInstruction};
