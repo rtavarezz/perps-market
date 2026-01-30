@@ -8,7 +8,7 @@ Imagine you want to bet on whether Bitcoin's price will go up or down, but you d
 
 This project is the "brain" of a trading platform that handles these bets. It's not a full exchange (no networking, no database, no UI), just the core logic that tracks who owns what, calculates profits and losses, and decides when someone's gone broke.
 
-## Key Concepts (No DeFi Background Needed)
+## Key Concepts
 
 ### The Basic Idea
 
@@ -92,24 +92,26 @@ User closes position → Collateral + PnL returned
 cargo test
 ```
 
-77 tests covering unit tests for each module plus property-based stress tests.
+97 tests covering unit tests for each module plus property-based stress tests.
+
+## Running Simulation
+
+```bash
+cargo run
+```
+
+Runs 7 simulation scenarios demonstrating order matching, position lifecycle, PnL tracking, funding settlement, and liquidation cascades.
 
 ## Project Status
 
-**Week 1 (Done)**: Core types, margin math, funding rates, liquidation logic, PnL calculation, account management, event definitions.
-
-**Week 2 (Next)**: Order matching engine, position update flow, mock oracle, simulation harness.
-
-**Week 3**: Liquidation execution, insurance fund, funding automation, edge cases.
-
-**Week 4**: API layer, persistence, integration tests, documentation.
+The core engine is complete with order book matching, position management, funding settlement, and liquidation execution.
 
 ## File Structure
 
 ```
 src/
 ├── lib.rs          # Module exports
-├── main.rs         # Placeholder entry point
+├── main.rs         # Simulation scenarios
 ├── types.rs        # Core primitives
 ├── margin.rs       # Margin requirements
 ├── funding.rs      # Funding rate logic
@@ -117,7 +119,19 @@ src/
 ├── position.rs     # Position tracking
 ├── liquidation.rs  # Liquidation logic
 ├── account.rs      # Account management
-└── events.rs       # State change events
+├── events.rs       # State change events
+├── order.rs        # Order types and order book
+├── market.rs       # Market configuration and state
+└── engine/         # Trading engine
+    ├── mod.rs      # Module exports
+    ├── config.rs   # Engine configuration
+    ├── core.rs     # Core engine struct
+    ├── orders.rs   # Order execution
+    ├── positions.rs # Position management
+    ├── pricing.rs  # Mark price updates
+    ├── funding.rs  # Funding settlement
+    ├── liquidations.rs # Liquidation checks
+    └── results.rs  # Result types and errors
 
 tests/
 └── property_tests.rs  # Randomized stress tests

@@ -1,239 +1,326 @@
-//! Perpetual DEX Core Simulation
+//! Perpetual DEX Core Simulation.
 //!
-//! Week 1: Core math validation and stress testing
+//! Demonstrates the full trading engine lifecycle including order matching,
+//! position tracking, funding settlement, and liquidation cascades.
 
 use perps_core::*;
+use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
 fn main() {
-    println!("=== Perpetual DEX Core - Week 1 Simulation ===\n");
+    println!("Perpetual DEX Core Engine Simulation");
+    println!("Single Market, Isolated Margin, Full Lifecycle\n");
 
-    // Initialize parameters
-    let margin_params = MarginParams::default();
-    let funding_params = FundingParams::default();
-    let _mark_params = MarkPriceParams::default();
-    let liq_params = LiquidationParams::default();
+    scenario_1_basic_trading();
+    scenario_2_multiple_traders();
+    scenario_3_position_lifecycle();
+    scenario_4_price_movement_and_pnl();
+    scenario_5_funding_settlement();
+    scenario_6_liquidation_cascade();
+    scenario_7_stress_test();
 
-    // Scenario: Open long position, price moves, check margin/liquidation
-    simulate_long_position_lifecycle(&margin_params, &funding_params);
-    println!("\n{}", "=".repeat(60));
-    simulate_leverage_tiers(&margin_params);
-    println!("\n{}", "=".repeat(60));
-    simulate_funding_mechanics(&funding_params);
-    println!("\n{}", "=".repeat(60));
-    simulate_liquidation_cascade(&margin_params, &liq_params);
+    println!("\nAll simulations completed successfully.");
 }
 
-fn simulate_long_position_lifecycle(margin_params: &MarginParams, _funding_params: &FundingParams) {
-    println!("📈 Scenario: Long Position Lifecycle\n");
+/// Basic order matching between two traders.
+fn scenario_1_basic_trading() {
+    println!("Scenario 1: Basic Order Matching\n");
 
-    let entry_price = Price::new_unchecked(dec!(50000));
-    let size = SignedSize::new(dec!(1)); // 1 BTC long
-    let leverage = Leverage::new(dec!(10)).unwrap();
+    let mut engine = Engine::new(EngineConfig::default());
+    engine.add_market(MarketConfig::btc_perp());
 
-    // Calculate margin requirements
-    let margin_req = calculate_margin_requirement(size, entry_price, leverage, margin_params);
-    println!("Entry: {} @ ${}", size, entry_price);
-    println!("Leverage: {}", leverage);
-    println!("Initial Margin Required: ${}", margin_req.initial);
-    println!("Maintenance Margin: ${}", margin_req.maintenance);
+    let alice = engine.create_account();
+    let bob = engine.create_account();
 
-    // Create position
-    let mut account = Account::new(AccountId(1), Timestamp::from_millis(0));
-    account.deposit(Quote::new(dec!(10000)));
+    engine.deposit(alice, Quote::new(dec!(50000))).unwrap();
+    engine.deposit(bob, Quote::new(dec!(50000))).unwrap();
+    engine.update_index_price(MarketId(1), Price::new_unchecked(dec!(50000))).unwrap();
 
-    let position = Position::new(
-        MarketId(1),
-        size,
-        entry_price,
-        margin_req.initial,
-        leverage,
-        dec!(0),
-        Timestamp::from_millis(0),
-    );
+    println!("  Alice and Bob each deposit $50,000");
+    println!("  Oracle price set to $50,000\n");
 
-    println!("\n--- Price moves up 4% ---");
-    let new_price = Price::new_unchecked(dec!(52000));
-    let pnl = position.unrealized_pnl(new_price);
-    let equity = position.equity(new_price, dec!(0));
-    println!("Mark Price: ${}", new_price);
-    println!("Unrealized PnL: ${}", pnl);
-    println!("Position Equity: ${}", equity);
+    let sell_result = engine
+        .place_limit_order(bob, MarketId(1), Side::Short, dec!(1.0), Price::new_unchecked(dec!(50000)), TimeInForce::GTC)
+        .unwrap();
 
-    let status = evaluate_margin_status(equity, &margin_req);
-    println!("Margin Status: {:?}", status);
+    println!("  Bob places SELL 1 BTC @ $50,000, posted: {}", sell_result.is_posted);
 
-    println!("\n--- Price drops 10% from entry ---");
-    let bad_price = Price::new_unchecked(dec!(45000));
-    let bad_pnl = position.unrealized_pnl(bad_price);
-    let bad_equity = position.equity(bad_price, dec!(0));
-    println!("Mark Price: ${}", bad_price);
-    println!("Unrealized PnL: ${}", bad_pnl);
-    println!("Position Equity: ${}", bad_equity);
+    let buy_result = engine
+        .place_market_order(alice, MarketId(1), Side::Long, dec!(0.5))
+        .unwrap();
 
-    let bad_status = evaluate_margin_status(bad_equity, &margin_req);
-    println!("Margin Status: {:?}", bad_status);
+    println!("  Alice places BUY 0.5 BTC market order");
+    println!("  Filled: {} BTC @ ${}\n", buy_result.filled_size, buy_result.average_price.unwrap());
 
-    // Check liquidation status
-    let notional = notional_value(size, bad_price);
-    let liq_status = evaluate_liquidation(
-        bad_equity,
-        &margin_req,
-        notional,
-        entry_price,
-        bad_price,
-        Side::Long,
-    );
-    println!("Liquidation Status: {:?}", liq_status);
+    let alice_pos = engine.get_account(alice).unwrap().get_position(MarketId(1)).unwrap();
+    let bob_pos = engine.get_account(bob).unwrap().get_position(MarketId(1)).unwrap();
+
+    println!("  Alice: {} BTC @ ${}", alice_pos.size, alice_pos.entry_price);
+    println!("  Bob: {} BTC @ ${}", bob_pos.size, bob_pos.entry_price);
+
+    let market = engine.get_market(MarketId(1)).unwrap();
+    println!("  Open interest: {} long, {} short\n", market.open_interest_long, market.open_interest_short);
 }
 
-fn simulate_leverage_tiers(margin_params: &MarginParams) {
-    println!("📊 Scenario: Dynamic Leverage Tiers\n");
+/// Order book depth with multiple market makers.
+fn scenario_2_multiple_traders() {
+    println!("Scenario 2: Order Book Depth\n");
 
-    let price = Price::new_unchecked(dec!(50000));
-    let max_leverage = Leverage::new(dec!(50)).unwrap();
+    let mut engine = Engine::new(EngineConfig::default());
+    engine.add_market(MarketConfig::btc_perp());
 
-    let test_sizes = [
-        (dec!(1), "Small ($50k)"),
-        (dec!(5), "Medium ($250k)"),
-        (dec!(20), "Large ($1M)"),
-        (dec!(100), "Whale ($5M)"),
+    let mm1 = engine.create_account();
+    let mm2 = engine.create_account();
+    let taker = engine.create_account();
+
+    for acc in [mm1, mm2, taker] {
+        engine.deposit(acc, Quote::new(dec!(100000))).unwrap();
+    }
+
+    engine.update_index_price(MarketId(1), Price::new_unchecked(dec!(50000))).unwrap();
+
+    engine.place_limit_order(mm1, MarketId(1), Side::Long, dec!(2.0), Price::new_unchecked(dec!(49900)), TimeInForce::GTC).unwrap();
+    engine.place_limit_order(mm1, MarketId(1), Side::Short, dec!(2.0), Price::new_unchecked(dec!(50100)), TimeInForce::GTC).unwrap();
+    engine.place_limit_order(mm2, MarketId(1), Side::Long, dec!(1.0), Price::new_unchecked(dec!(49950)), TimeInForce::GTC).unwrap();
+    engine.place_limit_order(mm2, MarketId(1), Side::Short, dec!(1.0), Price::new_unchecked(dec!(50050)), TimeInForce::GTC).unwrap();
+
+    let market = engine.get_market(MarketId(1)).unwrap();
+
+    println!("  Best bid: ${}, best ask: ${}", market.order_book.best_bid().unwrap(), market.order_book.best_ask().unwrap());
+    println!("  Spread: ${}", market.order_book.spread().unwrap_or(Decimal::ZERO));
+
+    println!("\n  Taker sweeps 2.5 BTC...");
+    let result = engine.place_market_order(taker, MarketId(1), Side::Long, dec!(2.5)).unwrap();
+
+    println!("  Filled {} BTC across {} fills\n", result.filled_size, result.fills.len());
+}
+
+/// Position lifecycle from open to close.
+fn scenario_3_position_lifecycle() {
+    println!("Scenario 3: Position Lifecycle\n");
+
+    let mut engine = Engine::new(EngineConfig::default());
+    engine.add_market(MarketConfig::btc_perp());
+
+    let trader = engine.create_account();
+    let counterparty = engine.create_account();
+
+    engine.deposit(trader, Quote::new(dec!(50000))).unwrap();
+    engine.deposit(counterparty, Quote::new(dec!(100000))).unwrap();
+    engine.update_index_price(MarketId(1), Price::new_unchecked(dec!(50000))).unwrap();
+
+    engine.place_limit_order(counterparty, MarketId(1), Side::Short, dec!(10.0), Price::new_unchecked(dec!(50000)), TimeInForce::GTC).unwrap();
+
+    println!("  Opening 0.5 BTC long...");
+    engine.place_market_order(trader, MarketId(1), Side::Long, dec!(0.5)).unwrap();
+    let pos = engine.get_account(trader).unwrap().get_position(MarketId(1)).unwrap();
+    println!("  Position: {} BTC @ ${}", pos.size, pos.entry_price);
+
+    println!("  Adding 0.3 BTC...");
+    engine.place_market_order(trader, MarketId(1), Side::Long, dec!(0.3)).unwrap();
+    let pos = engine.get_account(trader).unwrap().get_position(MarketId(1)).unwrap();
+    println!("  Position: {} BTC @ ${}", pos.size, pos.entry_price);
+
+    println!("  Closing 0.2 BTC...");
+    engine.place_market_order(trader, MarketId(1), Side::Short, dec!(0.2)).unwrap();
+    let pos = engine.get_account(trader).unwrap().get_position(MarketId(1)).unwrap();
+    println!("  Position: {} BTC", pos.size);
+
+    println!("  Closing remaining...");
+    engine.place_market_order(trader, MarketId(1), Side::Short, dec!(0.6)).unwrap();
+    let account = engine.get_account(trader).unwrap();
+    println!("  Position closed, balance: ${}, realized PnL: ${}\n", account.balance, account.realized_pnl);
+}
+
+/// Price movements and unrealized PnL tracking.
+fn scenario_4_price_movement_and_pnl() {
+    println!("Scenario 4: Price Movement and PnL\n");
+
+    let mut engine = Engine::new(EngineConfig::default());
+    engine.add_market(MarketConfig::btc_perp());
+
+    let long_trader = engine.create_account();
+    let short_trader = engine.create_account();
+
+    engine.deposit(long_trader, Quote::new(dec!(10000))).unwrap();
+    engine.deposit(short_trader, Quote::new(dec!(10000))).unwrap();
+    engine.update_index_price(MarketId(1), Price::new_unchecked(dec!(50000))).unwrap();
+
+    engine.place_limit_order(short_trader, MarketId(1), Side::Short, dec!(1.0), Price::new_unchecked(dec!(50000)), TimeInForce::GTC).unwrap();
+    engine.place_market_order(long_trader, MarketId(1), Side::Long, dec!(1.0)).unwrap();
+
+    println!("  Entry @ $50,000");
+    print_pnl(&engine, long_trader, short_trader);
+
+    engine.update_index_price(MarketId(1), Price::new_unchecked(dec!(52000))).unwrap();
+    println!("  Price rises to $52,000");
+    print_pnl(&engine, long_trader, short_trader);
+
+    engine.update_index_price(MarketId(1), Price::new_unchecked(dec!(48000))).unwrap();
+    println!("  Price drops to $48,000");
+    print_pnl(&engine, long_trader, short_trader);
+
+    println!();
+}
+
+fn print_pnl(engine: &Engine, long_id: AccountId, short_id: AccountId) {
+    let market = engine.get_market(MarketId(1)).unwrap();
+    let mark = market.effective_mark_price().unwrap();
+
+    let long_pos = engine.get_account(long_id).unwrap().get_position(MarketId(1)).unwrap();
+    let short_pos = engine.get_account(short_id).unwrap().get_position(MarketId(1)).unwrap();
+
+    let long_pnl = long_pos.unrealized_pnl(mark);
+    let short_pnl = short_pos.unrealized_pnl(mark);
+
+    println!("    Long PnL: ${}, Short PnL: ${}", long_pnl, short_pnl);
+}
+
+/// Funding rate settlement between longs and shorts.
+fn scenario_5_funding_settlement() {
+    println!("Scenario 5: Funding Settlement\n");
+
+    let mut engine = Engine::new(EngineConfig::default());
+    engine.add_market(MarketConfig::btc_perp());
+
+    let long_trader = engine.create_account();
+    let short_trader = engine.create_account();
+
+    engine.deposit(long_trader, Quote::new(dec!(10000))).unwrap();
+    engine.deposit(short_trader, Quote::new(dec!(10000))).unwrap();
+    engine.update_index_price(MarketId(1), Price::new_unchecked(dec!(50000))).unwrap();
+
+    engine.place_limit_order(short_trader, MarketId(1), Side::Short, dec!(1.0), Price::new_unchecked(dec!(50000)), TimeInForce::GTC).unwrap();
+    engine.place_market_order(long_trader, MarketId(1), Side::Long, dec!(1.0)).unwrap();
+
+    let long_before = engine.get_account(long_trader).unwrap().balance;
+    let short_before = engine.get_account(short_trader).unwrap().balance;
+
+    println!("  Before funding: long ${}, short ${}", long_before, short_before);
+
+    engine.advance_time(8 * 60 * 60 * 1000);
+    let result = engine.settle_funding(MarketId(1)).unwrap();
+
+    let long_after = engine.get_account(long_trader).unwrap().balance;
+    let short_after = engine.get_account(short_trader).unwrap().balance;
+
+    println!("  After 8 hours: long ${}, short ${}", long_after, short_after);
+    println!("  Funding rate: {:.6}%, {} accounts affected\n", result.funding_rate * dec!(100), result.accounts_affected);
+}
+
+/// Liquidation cascade from price crash.
+fn scenario_6_liquidation_cascade() {
+    println!("Scenario 6: Liquidation Cascade\n");
+
+    let mut engine = Engine::new(EngineConfig::default());
+    engine.add_market(MarketConfig::btc_perp());
+    engine.fund_insurance(Quote::new(dec!(100000)));
+
+    let conservative = engine.create_account();
+    let moderate = engine.create_account();
+    let aggressive = engine.create_account();
+    let counterparty = engine.create_account();
+
+    engine.deposit(conservative, Quote::new(dec!(20000))).unwrap();
+    engine.deposit(moderate, Quote::new(dec!(10000))).unwrap();
+    engine.deposit(aggressive, Quote::new(dec!(5000))).unwrap();
+    engine.deposit(counterparty, Quote::new(dec!(500000))).unwrap();
+
+    engine.update_index_price(MarketId(1), Price::new_unchecked(dec!(50000))).unwrap();
+
+    engine.place_limit_order(counterparty, MarketId(1), Side::Short, dec!(10.0), Price::new_unchecked(dec!(50000)), TimeInForce::GTC).unwrap();
+
+    engine.place_market_order(conservative, MarketId(1), Side::Long, dec!(0.2)).unwrap();
+    engine.place_market_order(moderate, MarketId(1), Side::Long, dec!(0.5)).unwrap();
+    engine.place_market_order(aggressive, MarketId(1), Side::Long, dec!(1.0)).unwrap();
+
+    println!("  Positions opened at $50,000");
+
+    for (price, label) in [(dec!(48000), "$48k"), (dec!(45000), "$45k"), (dec!(42000), "$42k"), (dec!(40000), "$40k")] {
+        engine.update_index_price(MarketId(1), Price::new_unchecked(price)).unwrap();
+        let liqs = engine.check_liquidations(MarketId(1)).unwrap();
+
+        if liqs.is_empty() {
+            println!("  {}: no liquidations", label);
+        } else {
+            for liq in &liqs {
+                let name = if liq.account_id == conservative { "conservative" }
+                    else if liq.account_id == moderate { "moderate" }
+                    else { "aggressive" };
+                println!("  {}: {} liquidated, {} BTC, bad debt ${}", label, name, liq.position_size.abs(), liq.bad_debt);
+            }
+        }
+    }
+
+    println!("  Insurance fund: ${}\n", engine.insurance_fund_balance());
+}
+
+/// Stress test with many traders and volatile prices.
+fn scenario_7_stress_test() {
+    println!("Scenario 7: Stress Test\n");
+
+    let mut engine = Engine::new(EngineConfig::default());
+    engine.add_market(MarketConfig::btc_perp());
+    engine.fund_insurance(Quote::new(dec!(1000000)));
+
+    let num_traders = 20;
+    let mut traders = Vec::new();
+
+    for i in 0..num_traders {
+        let id = engine.create_account();
+        let capital = dec!(5000) + Decimal::from(i) * dec!(2500);
+        engine.deposit(id, Quote::new(capital)).unwrap();
+        traders.push(id);
+    }
+
+    engine.update_index_price(MarketId(1), Price::new_unchecked(dec!(50000))).unwrap();
+
+    println!("  Created {} traders with $5k to $52.5k", num_traders);
+
+    let mut order_count = 0;
+    for (i, &trader) in traders.iter().enumerate() {
+        let side = if i % 2 == 0 { Side::Long } else { Side::Short };
+        let price_offset = Decimal::from((i as i32 - 10) * 50);
+        let price = dec!(50000) + price_offset;
+        let size = dec!(0.1) + Decimal::from(i % 5) * dec!(0.05);
+
+        if engine.place_limit_order(trader, MarketId(1), side, size, Price::new_unchecked(price), TimeInForce::GTC).is_ok() {
+            order_count += 1;
+        }
+    }
+
+    let market = engine.get_market(MarketId(1)).unwrap();
+    println!("  Placed {} orders, {} on book", order_count, market.order_book.order_count());
+
+    let prices = [
+        dec!(50500), dec!(51000), dec!(50200), dec!(49000), dec!(48000),
+        dec!(49500), dec!(51500), dec!(52000), dec!(50000), dec!(47000),
+        dec!(45000), dec!(43000), dec!(44000), dec!(46000), dec!(48000),
     ];
 
-    for (size_val, label) in &test_sizes {
-        let size = SignedSize::new(*size_val);
-        let notional = notional_value(size, price);
-        let effective_lev = effective_max_leverage(notional, margin_params);
-        let margin_req = calculate_margin_requirement(size, price, max_leverage, margin_params);
+    let mut total_liquidations = 0;
+    let mut total_bad_debt = Decimal::ZERO;
 
-        println!(
-            "{}: Notional ${}, Max Leverage {}, IM ${}",
-            label,
-            notional,
-            effective_lev,
-            margin_req.initial
-        );
-    }
-}
-
-fn simulate_funding_mechanics(funding_params: &FundingParams) {
-    println!("💰 Scenario: Funding Rate Mechanics\n");
-
-    let index_price = Price::new_unchecked(dec!(50000));
-
-    // Premium scenarios
-    let premiums = [
-        (dec!(50500), "0.5% premium"),
-        (dec!(49500), "0.5% discount"),
-        (dec!(52500), "5% premium (extreme)"),
-    ];
-
-    for (mark_val, label) in &premiums {
-        let mark_price = Price::new_unchecked(*mark_val);
-        let premium = calculate_premium_index(mark_price, index_price);
-        let funding_rate = calculate_funding_rate(premium, funding_params);
-        let annual_rate = annualized_funding_rate(funding_rate);
-
-        println!("{}: Premium {:.4}%, Rate {:.4}%, APR {:.2}%",
-            label,
-            premium * dec!(100),
-            funding_rate * dec!(100),
-            annual_rate * dec!(100)
-        );
+    for price in prices {
+        engine.update_index_price(MarketId(1), Price::new_unchecked(price)).unwrap();
+        let liqs = engine.check_liquidations(MarketId(1)).unwrap();
+        total_liquidations += liqs.len();
+        for liq in &liqs {
+            total_bad_debt += liq.bad_debt.value();
+        }
     }
 
-    println!("\n--- Funding Payment Example ---");
-    let size = SignedSize::new(dec!(1)); // 1 BTC long
-    let mark = Price::new_unchecked(dec!(50500));
-    let funding_rate = dec!(0.001); // 0.1%
+    println!("  Price range: $43k to $52k");
+    println!("  Total liquidations: {}", total_liquidations);
+    println!("  Total bad debt: ${}", total_bad_debt);
 
-    let payment = calculate_funding_payment(size, mark, funding_rate);
-    println!("Long 1 BTC @ 0.1% funding: pays ${}", payment);
-
-    let short_payment = calculate_funding_payment(SignedSize::new(dec!(-1)), mark, funding_rate);
-    println!("Short 1 BTC @ 0.1% funding: receives ${}", short_payment.abs());
-}
-
-fn simulate_liquidation_cascade(margin_params: &MarginParams, liq_params: &LiquidationParams) {
-    println!("⚠️  Scenario: Liquidation Cascade\n");
-
-    // Setup: Multiple positions with different leverage
-    let positions = vec![
-        ("Conservative", dec!(2), Leverage::new(dec!(5)).unwrap()),
-        ("Moderate", dec!(1), Leverage::new(dec!(10)).unwrap()),
-        ("Aggressive", dec!(0.5), Leverage::new(dec!(20)).unwrap()),
-    ];
-
-    let entry_price = Price::new_unchecked(dec!(50000));
-
-    println!("Initial positions at $50,000:\n");
-    for (name, size_val, leverage) in &positions {
-        let size = SignedSize::new(*size_val);
-        let margin_req = calculate_margin_requirement(size, entry_price, *leverage, margin_params);
-        let mmf = margin_req.maintenance.value() / (size.abs() * entry_price.value());
-        let liq_price = calculate_liquidation_price(entry_price, *leverage, Side::Long, mmf);
-        
-        println!(
-            "  {}: {} BTC @ {}, IM ${}, Liq Price ~${}",
-            name, size_val, leverage, margin_req.initial, liq_price
-        );
+    engine.advance_time(8 * 60 * 60 * 1000);
+    if let Ok(funding) = engine.settle_funding(MarketId(1)) {
+        println!("  Funding settled, {} accounts", funding.accounts_affected);
     }
 
-    // Price crash simulation
-    println!("\n--- Price crashes to $42,000 (16% drop) ---\n");
-    let crash_price = Price::new_unchecked(dec!(42000));
-
-    for (name, size_val, leverage) in &positions {
-        let size = SignedSize::new(*size_val);
-        let margin_req = calculate_margin_requirement(size, entry_price, *leverage, margin_params);
-        
-        // Create simulated position
-        let position = Position::new(
-            MarketId(1),
-            size,
-            entry_price,
-            margin_req.initial,
-            *leverage,
-            dec!(0),
-            Timestamp::from_millis(0),
-        );
-
-        let pnl = position.unrealized_pnl(crash_price);
-        let equity = position.equity(crash_price, dec!(0));
-        let notional = notional_value(size, crash_price);
-        
-        let status = evaluate_liquidation(
-            equity,
-            &margin_req,
-            notional,
-            entry_price,
-            crash_price,
-            Side::Long,
-        );
-
-        let status_str = match &status {
-            LiquidationStatus::Safe { .. } => "✅ Safe",
-            LiquidationStatus::AtRisk { buffer_percent, .. } => 
-                &format!("⚠️  At Risk ({:.1}% buffer)", buffer_percent),
-            LiquidationStatus::Liquidatable { shortfall, .. } => 
-                &format!("🔴 LIQUIDATABLE (${} shortfall)", shortfall),
-            LiquidationStatus::Bankrupt { bad_debt } => 
-                &format!("💀 BANKRUPT (${} bad debt)", bad_debt),
-        };
-
-        println!(
-            "  {}: PnL ${}, Equity ${} -> {}",
-            name, pnl, equity, status_str
-        );
-    }
-
-    // Liquidation penalty calculation
-    println!("\n--- Liquidation Penalties ---");
-    let liq_position_value = Quote::new(dec!(50000));
-    let penalty = calculate_liquidation_penalty(liq_position_value, liq_params);
-    println!("For $50,000 position:");
-    println!("  Total Penalty: ${}", penalty.total);
-    println!("  Liquidator Reward: ${}", penalty.liquidator_reward);
-    println!("  Insurance Fund: ${}", penalty.insurance_contribution);
+    let active = traders.iter().filter(|&&id| engine.get_account(id).unwrap().get_position(MarketId(1)).is_some()).count();
+    println!("  Active positions: {}/{}", active, num_traders);
+    println!("  Events generated: {}\n", engine.events().len());
 }
 
