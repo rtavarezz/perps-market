@@ -1,39 +1,27 @@
-//! Conditional orders: stop-loss, take-profit, and trailing stops.
-//!
-//! Conditional orders are stored separately from the order book and only become
-//! active when their trigger conditions are met. This enables traders to manage
-//! risk without constant monitoring.
+// 2.1: conditional orders: stop loss, take profit, trailing stops.
+// trigger when mark price hits threshold. supports OCO (one-cancels-other) linking.
 
 use crate::types::{AccountId, MarketId, Price, Side, Timestamp};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-/// Unique identifier for conditional orders.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ConditionalOrderId(pub u64);
 
-/// Type of conditional order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ConditionalType {
-    /// Triggers when price falls below threshold (for longs) or rises above (for shorts).
-    StopLoss,
-    /// Triggers when price rises above threshold (for longs) or falls below (for shorts).
-    TakeProfit,
-    /// Stop that trails the price by a fixed amount or percentage.
-    TrailingStop,
+    StopLoss,       // triggers on adverse price move
+    TakeProfit,     // triggers on favorable price move
+    TrailingStop,   // follows price, triggers on reversal
 }
 
-/// How the trigger price should be compared.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TriggerCondition {
-    /// Triggers when price crosses above the trigger.
-    Above,
-    /// Triggers when price crosses below the trigger.
-    Below,
+    Above,  // triggers when price crosses above
+    Below,  // triggers when price crosses below
 }
 
-/// A conditional order waiting to be triggered.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConditionalOrder {
     pub id: ConditionalOrderId,
@@ -44,15 +32,12 @@ pub struct ConditionalOrder {
     pub order_type: ConditionalType,
     pub trigger_price: Price,
     pub trigger_condition: TriggerCondition,
-    /// Optional limit price for the resulting order (None means market order).
-    pub limit_price: Option<Price>,
-    /// Whether this order reduces an existing position only.
+    pub limit_price: Option<Price>,        // None = market order when triggered
     pub reduce_only: bool,
-    /// For trailing stops, the trail amount or percentage.
-    pub trail_value: Option<Decimal>,
-    /// For trailing stops, the highest/lowest seen price.
-    pub trail_reference: Option<Price>,
+    pub trail_value: Option<Decimal>,       // trailing stop amount
+    pub trail_reference: Option<Price>,     // best price seen for trailing calc
     pub created_at: Timestamp,
+    pub linked_order_id: Option<ConditionalOrderId>,  // OCO: triggers cancel the linked order
 }
 
 impl ConditionalOrder {
@@ -88,6 +73,7 @@ impl ConditionalOrder {
             trail_value: None,
             trail_reference: None,
             created_at: timestamp,
+            linked_order_id: None,
         }
     }
 
@@ -122,6 +108,7 @@ impl ConditionalOrder {
             trail_value: None,
             trail_reference: None,
             created_at: timestamp,
+            linked_order_id: None,
         }
     }
 
@@ -162,10 +149,16 @@ impl ConditionalOrder {
             trail_value: Some(trail_amount),
             trail_reference: Some(current_price),
             created_at: timestamp,
+            linked_order_id: None,
         }
     }
 
-    /// Check if this order should trigger at the given price.
+
+    pub fn link_oco(&mut self, other_id: ConditionalOrderId) {
+        self.linked_order_id = Some(other_id);
+    }
+
+
     pub fn should_trigger(&self, mark_price: Price) -> bool {
         match self.trigger_condition {
             TriggerCondition::Above => mark_price.value() >= self.trigger_price.value(),
@@ -173,7 +166,7 @@ impl ConditionalOrder {
         }
     }
 
-    /// Update trailing stop based on favorable price movement.
+    // 2.1.2: update trailing stop offset when price moves favorably
     pub fn update_trailing(&mut self, mark_price: Price) {
         if self.order_type != ConditionalType::TrailingStop {
             return;
@@ -209,7 +202,7 @@ impl ConditionalOrder {
     }
 }
 
-/// Manages conditional orders for a market.
+// 2.1: manages all conditional orders for a market
 #[derive(Debug, Clone)]
 pub struct ConditionalOrderBook {
     pub market_id: MarketId,
@@ -228,14 +221,12 @@ impl ConditionalOrderBook {
         }
     }
 
-    /// Generate a new conditional order ID.
     pub fn next_id(&mut self) -> ConditionalOrderId {
         let id = ConditionalOrderId(self.next_id);
         self.next_id += 1;
         id
     }
 
-    /// Insert a conditional order.
     pub fn insert(&mut self, order: ConditionalOrder) {
         let id = order.id;
         let account = order.account_id;
@@ -244,11 +235,27 @@ impl ConditionalOrderBook {
         self.by_account.entry(account).or_default().push(id);
     }
 
-    /// Remove a conditional order.
+    // 2.1.3: insert OCO pair; when one triggers, the other is cancelled
+    pub fn insert_oco(&mut self, mut order_a: ConditionalOrder, mut order_b: ConditionalOrder) {
+        order_a.linked_order_id = Some(order_b.id);
+        order_b.linked_order_id = Some(order_a.id);
+        self.insert(order_a);
+        self.insert(order_b);
+    }
+
+    // removes order and its OCO partner if linked
     pub fn remove(&mut self, id: ConditionalOrderId) -> Option<ConditionalOrder> {
         if let Some(order) = self.orders.remove(&id) {
             if let Some(ids) = self.by_account.get_mut(&order.account_id) {
                 ids.retain(|&oid| oid != id);
+            }
+            // OCO: also remove the linked order
+            if let Some(linked_id) = order.linked_order_id {
+                if let Some(linked) = self.orders.remove(&linked_id) {
+                    if let Some(ids) = self.by_account.get_mut(&linked.account_id) {
+                        ids.retain(|&oid| oid != linked_id);
+                    }
+                }
             }
             Some(order)
         } else {
@@ -256,12 +263,11 @@ impl ConditionalOrderBook {
         }
     }
 
-    /// Get a conditional order.
     pub fn get(&self, id: ConditionalOrderId) -> Option<&ConditionalOrder> {
         self.orders.get(&id)
     }
 
-    /// Get all orders for an account.
+
     pub fn get_by_account(&self, account_id: AccountId) -> Vec<&ConditionalOrder> {
         self.by_account
             .get(&account_id)
@@ -269,7 +275,7 @@ impl ConditionalOrderBook {
             .unwrap_or_default()
     }
 
-    /// Check all orders and return those that should trigger.
+
     pub fn check_triggers(&self, mark_price: Price) -> Vec<ConditionalOrderId> {
         self.orders
             .iter()
@@ -278,14 +284,13 @@ impl ConditionalOrderBook {
             .collect()
     }
 
-    /// Update all trailing stops based on price movement.
+
     pub fn update_trailing_stops(&mut self, mark_price: Price) {
         for order in self.orders.values_mut() {
             order.update_trailing(mark_price);
         }
     }
 
-    /// Cancel all conditional orders for an account.
     pub fn cancel_all_for_account(&mut self, account_id: AccountId) -> Vec<ConditionalOrder> {
         let ids = self.by_account.remove(&account_id).unwrap_or_default();
         ids.into_iter()
@@ -293,25 +298,22 @@ impl ConditionalOrderBook {
             .collect()
     }
 
-    /// Total number of conditional orders.
     pub fn len(&self) -> usize {
         self.orders.len()
     }
 
-    /// Check if empty.
     pub fn is_empty(&self) -> bool {
         self.orders.is_empty()
     }
 }
 
-/// Result of checking conditional orders.
 #[derive(Debug, Clone)]
 pub struct TriggeredOrders {
     pub triggered: Vec<ConditionalOrder>,
     pub remaining: usize,
 }
 
-/// Check and collect triggered orders, removing them from the book.
+// checks triggers and removes fired orders (+ their OCO partners)
 pub fn process_triggers(
     book: &mut ConditionalOrderBook,
     mark_price: Price,
