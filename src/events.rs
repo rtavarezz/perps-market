@@ -1,7 +1,5 @@
-//! State transition events.
-//!
-//! Every state change in the engine produces an event for audit trails,
-//! state reconstruction, and external system notifications.
+// 11.0: every state change produces an event. used for audit trails, state reconstruction,
+// and notifying external systems. the EventPayload enum lists all event types.
 
 use crate::types::{AccountId, MarketId, OrderId, Price, Quote, Side, SignedSize, Timestamp};
 use rust_decimal::Decimal;
@@ -52,6 +50,13 @@ pub enum EventPayload {
     PositionOpened(PositionOpenedEvent),
     PositionClosed(PositionClosedEvent),
     PositionUpdated(PositionUpdatedEvent),
+
+    // Market data events
+    OiUpdated(OiUpdatedEvent),
+    FundingFeeCollected(FundingFeeCollectedEvent),
+
+    // Custody events
+    WithdrawalRejected(WithdrawalRejectedEvent),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -200,6 +205,28 @@ pub struct PositionUpdatedEvent {
     pub old_entry_price: Price,
     pub new_entry_price: Price,
     pub realized_pnl: Quote,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OiUpdatedEvent {
+    pub market_id: MarketId,
+    pub long_oi: Decimal,
+    pub short_oi: Decimal,
+    pub total_oi: Decimal,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FundingFeeCollectedEvent {
+    pub market_id: MarketId,
+    pub lp_fee_amount: Quote, // portion routed to LP pool
+    pub funding_rate: Decimal,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WithdrawalRejectedEvent {
+    pub account_id: AccountId,
+    pub amount: Quote,
+    pub reason: String,
 }
 
 pub trait EventEmitter {

@@ -1,4 +1,4 @@
-//! Result types and errors for engine operations.
+// 8.0.2: result types and errors for engine operations.
 
 use crate::order::Fill;
 use crate::types::{AccountId, MarketId, OrderId, Price, Quote, SignedSize};
@@ -6,7 +6,6 @@ use crate::account::AccountError;
 use crate::market::MarketError;
 use rust_decimal::Decimal;
 
-/// Result of placing an order.
 #[derive(Debug, Clone)]
 pub struct OrderResult {
     pub order_id: OrderId,
@@ -17,16 +16,15 @@ pub struct OrderResult {
     pub fills: Vec<Fill>,
 }
 
-/// Result of funding settlement.
 #[derive(Debug, Clone)]
 pub struct FundingResult {
     pub funding_rate: Decimal,
     pub total_long_payments: Quote,
     pub total_short_payments: Quote,
+    pub lp_fee_collected: Quote, // LP pool cut
     pub accounts_affected: usize,
 }
 
-/// Result of a liquidation.
 #[derive(Debug, Clone)]
 pub struct LiquidationResult {
     pub account_id: AccountId,
@@ -38,7 +36,6 @@ pub struct LiquidationResult {
     pub realized_pnl: Quote,
 }
 
-/// Engine error types.
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum EngineError {
     #[error("Market {0:?} not found")]
@@ -64,4 +61,7 @@ pub enum EngineError {
 
     #[error("Market error: {0}")]
     Market(#[from] MarketError),
+
+    #[error("Insufficient pool liquidity: provided {provided}, minimum {minimum}")]
+    InsufficientPoolLiquidity { provided: Quote, minimum: Quote },
 }

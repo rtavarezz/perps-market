@@ -1,8 +1,8 @@
-//! Liquidation detection and execution.
+// 8.9: liquidation detection and execution.
 
 use super::core::Engine;
 use super::results::{EngineError, LiquidationResult};
-use crate::events::{BadDebtEvent, EventPayload, LiquidationEvent};
+use crate::events::{BadDebtEvent, EventPayload, LiquidationEvent, OiUpdatedEvent};
 use crate::liquidation::{calculate_liquidation_penalty, evaluate_liquidation, LiquidationStatus};
 use crate::margin::{calculate_margin_requirement, MarginRequirement};
 use crate::position::Position;
@@ -10,7 +10,6 @@ use crate::types::{AccountId, MarketId, Price, Quote, Side};
 use rust_decimal::Decimal;
 
 impl Engine {
-    /// Check and execute liquidations for a market.
     pub fn check_liquidations(&mut self, market_id: MarketId) -> Result<Vec<LiquidationResult>, EngineError> {
         let market = self
             .markets
@@ -74,7 +73,6 @@ impl Engine {
         Ok(results)
     }
 
-    /// Execute a liquidation.
     fn execute_liquidation(
         &mut self,
         account_id: AccountId,
@@ -152,6 +150,15 @@ impl Engine {
         for event in events_to_emit {
             self.emit_event(event);
         }
+
+        // Emit OI snapshot after liquidation
+        let market = self.markets.get(&market_id).unwrap();
+        self.emit_event(EventPayload::OiUpdated(OiUpdatedEvent {
+            market_id,
+            long_oi: market.open_interest_long,
+            short_oi: market.open_interest_short,
+            total_oi: market.open_interest_long.max(market.open_interest_short),
+        }));
 
         Ok(LiquidationResult {
             account_id,

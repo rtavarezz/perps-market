@@ -1,15 +1,15 @@
-//! Core engine struct and basic operations.
+// 8.0 engine/core.rs: main engine. holds all markets, accounts, insurance fund.
 
 use super::config::EngineConfig;
 use super::results::EngineError;
 use crate::account::Account;
-use crate::events::{DepositEvent, Event, EventId, EventPayload, WithdrawalEvent};
+use crate::events::{DepositEvent, Event, EventId, EventPayload, WithdrawalEvent, WithdrawalRejectedEvent};
 use crate::liquidation::InsuranceFund;
 use crate::market::{MarketConfig, MarketState, MarketStatus};
 use crate::types::{AccountId, MarketId, Quote, Timestamp};
 use std::collections::HashMap;
 
-/// The core perpetual trading engine.
+/** 8.1: main engine struct. all state lives here */
 #[derive(Debug)]
 pub struct Engine {
     pub(super) config: EngineConfig,
@@ -23,7 +23,6 @@ pub struct Engine {
 }
 
 impl Engine {
-    /// Create a new engine with the given configuration.
     pub fn new(config: EngineConfig) -> Self {
         Self {
             config,
@@ -37,22 +36,18 @@ impl Engine {
         }
     }
 
-    /// Set the current engine time.
     pub fn set_time(&mut self, timestamp: Timestamp) {
         self.current_time = timestamp;
     }
 
-    /// Get the current engine time.
     pub fn time(&self) -> Timestamp {
         self.current_time
     }
 
-    /// Advance time by a duration in milliseconds.
     pub fn advance_time(&mut self, millis: i64) {
         self.current_time = Timestamp::from_millis(self.current_time.as_millis() + millis);
     }
 
-    /// Add a new market.
     pub fn add_market(&mut self, config: MarketConfig) -> MarketId {
         let market_id = config.id;
         let state = MarketState::new(config, self.current_time);
@@ -60,17 +55,14 @@ impl Engine {
         market_id
     }
 
-    /// Get a market by ID.
     pub fn get_market(&self, market_id: MarketId) -> Option<&MarketState> {
         self.markets.get(&market_id)
     }
 
-    /// Get a mutable market by ID.
     pub fn get_market_mut(&mut self, market_id: MarketId) -> Option<&mut MarketState> {
         self.markets.get_mut(&market_id)
     }
 
-    /// Pause a market.
     pub fn pause_market(&mut self, market_id: MarketId) -> Result<(), EngineError> {
         let market = self
             .markets
@@ -80,7 +72,6 @@ impl Engine {
         Ok(())
     }
 
-    /// Resume a market.
     pub fn resume_market(&mut self, market_id: MarketId) -> Result<(), EngineError> {
         let market = self
             .markets
@@ -90,7 +81,6 @@ impl Engine {
         Ok(())
     }
 
-    /// Create a new account.
     pub fn create_account(&mut self) -> AccountId {
         let id = AccountId(self.accounts.len() as u64 + 1);
         let account = Account::new(id, self.current_time);
@@ -98,22 +88,18 @@ impl Engine {
         id
     }
 
-    /// Get an account by ID.
     pub fn get_account(&self, account_id: AccountId) -> Option<&Account> {
         self.accounts.get(&account_id)
     }
 
-    /// Get a mutable account by ID.
     pub fn get_account_mut(&mut self, account_id: AccountId) -> Option<&mut Account> {
         self.accounts.get_mut(&account_id)
     }
 
-    /// Iterate over all accounts.
     pub fn accounts_iter(&self) -> impl Iterator<Item = (&AccountId, &Account)> {
         self.accounts.iter()
     }
 
-    /// Deposit funds into an account.
     pub fn deposit(&mut self, account_id: AccountId, amount: Quote) -> Result<(), EngineError> {
         let account = self
             .accounts
@@ -132,14 +118,22 @@ impl Engine {
         Ok(())
     }
 
-    /// Withdraw funds from an account.
+    // blocked if positions are open
     pub fn withdraw(&mut self, account_id: AccountId, amount: Quote) -> Result<(), EngineError> {
         let account = self
             .accounts
             .get_mut(&account_id)
             .ok_or(EngineError::AccountNotFound(account_id))?;
 
-        account.withdraw(amount).map_err(EngineError::Account)?;
+        if let Err(e) = account.withdraw(amount) {
+            // Emit rejection event for audit
+            self.emit_event(EventPayload::WithdrawalRejected(WithdrawalRejectedEvent {
+                account_id,
+                amount,
+                reason: e.to_string(),
+            }));
+            return Err(EngineError::Account(e));
+        }
         let new_balance = account.balance;
 
         self.emit_event(EventPayload::Withdrawal(WithdrawalEvent {
@@ -151,28 +145,56 @@ impl Engine {
         Ok(())
     }
 
-    /// Get recent events.
+    // requires initial pool deposit above min_pool_tvl
+    pub fn add_market_with_pool(
+        &mut self,
+        config: MarketConfig,
+        initial_pool_deposit: Quote,
+        min_pool_tvl: Quote,
+    ) -> Result<MarketId, EngineError> {
+        if initial_pool_deposit.value() < min_pool_tvl.value() {
+            return Err(EngineError::InsufficientPoolLiquidity {
+                provided: initial_pool_deposit,
+                minimum: min_pool_tvl,
+            });
+        }
+        let market_id = self.add_market(config);
+        // Pool deposit is tracked on the market's pool_funding_fees for now.
+        // In production this would create a SharedPool and deposit into it.
+        let market = self.markets.get_mut(&market_id).unwrap();
+        market.pool_funding_fees += initial_pool_deposit.value();
+        Ok(market_id)
+    }
+
+    pub fn set_referrer(&mut self, account_id: AccountId, referrer_id: AccountId) -> Result<(), EngineError> {
+        if !self.accounts.contains_key(&referrer_id) {
+            return Err(EngineError::AccountNotFound(referrer_id));
+        }
+        let account = self
+            .accounts
+            .get_mut(&account_id)
+            .ok_or(EngineError::AccountNotFound(account_id))?;
+        account.set_referrer(referrer_id);
+        Ok(())
+    }
+
     pub fn recent_events(&self, count: usize) -> &[Event] {
         let start = self.events.len().saturating_sub(count);
         &self.events[start..]
     }
 
-    /// Get all events.
     pub fn events(&self) -> &[Event] {
         &self.events
     }
 
-    /// Get insurance fund balance.
     pub fn insurance_fund_balance(&self) -> Quote {
         self.insurance_fund.balance
     }
 
-    /// Add funds to insurance fund.
     pub fn fund_insurance(&mut self, amount: Quote) {
         self.insurance_fund.deposit(amount);
     }
 
-    /// Emit an event and add it to the event log.
     pub(super) fn emit_event(&mut self, payload: EventPayload) {
         let event = Event::new(EventId(self.next_event_id), self.current_time, payload);
         self.next_event_id += 1;
