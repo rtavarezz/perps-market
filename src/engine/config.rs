@@ -1,12 +1,12 @@
-//! Engine configuration options.
+// 8.0.1: engine config. max events, verbose logging, fee schedule.
 
-/// Engine configuration.
+use crate::config::FeeConfig;
+
 #[derive(Debug, Clone)]
 pub struct EngineConfig {
-    /// Maximum number of events to retain in memory.
     pub max_events: usize,
-    /// Enable verbose logging.
     pub verbose: bool,
+    pub fees: FeeConfig,
 }
 
 impl Default for EngineConfig {
@@ -14,6 +14,7 @@ impl Default for EngineConfig {
         Self {
             max_events: 100_000,
             verbose: false,
+            fees: FeeConfig::default(),
         }
     }
 }

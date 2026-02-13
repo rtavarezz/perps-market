@@ -1,9 +1,5 @@
-// Integration Configuration
-//
-// Central configuration for the perps engine. This brings together all the
-// configurable parameters from different modules into a single, validated
-// configuration structure. Makes it easy to spin up different environments
-// (testnet, mainnet, simulation) with different settings.
+// 7.0 config.rs: all settings in one place. fees, margins, risk params.
+// 7.1 FeeConfig has maker/taker fees. no builder fees or referrals yet.
 
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -14,26 +10,26 @@ use crate::margin::MarginParams;
 use crate::funding::FundingParams;
 use crate::risk::RiskParams;
 
-/// Complete configuration for a perps market
+// Complete configuration for a perps market
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MarketConfig {
-    /// Human readable market name
+    // Human readable market name
     pub name: String,
-    /// Market symbol (e.g. "BTC-PERP")
+    // Market symbol (e.g. "BTC-PERP")
     pub symbol: String,
-    /// Base asset (what you're trading)
+    // Base asset (what you're trading)
     pub base_asset: String,
-    /// Quote asset (what you're settling in)
+    // Quote asset (what you're settling in)
     pub quote_asset: String,
-    /// Minimum order size
+    // Minimum order size
     pub min_order_size: Decimal,
-    /// Maximum order size
+    // Maximum order size
     pub max_order_size: Decimal,
-    /// Price tick size (minimum price increment)
+    // Price tick size (minimum price increment)
     pub tick_size: Decimal,
-    /// Size step (minimum size increment)
+    // Size step (minimum size increment)
     pub lot_size: Decimal,
-    /// Whether the market is currently active
+    // Whether the market is currently active
     pub active: bool,
 }
 
@@ -53,16 +49,18 @@ impl Default for MarketConfig {
     }
 }
 
-/// Fee structure for the market
+/** 7.2: fee settings. maker/taker in bps. 100 bps = 1% */
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FeeConfig {
-    /// Maker fee in basis points (negative = rebate)
+    // Maker fee in basis points (negative = rebate)
     pub maker_fee_bps: i32,
-    /// Taker fee in basis points
+    // Taker fee in basis points
     pub taker_fee_bps: u32,
-    /// Liquidation fee in basis points
+    // Liquidation fee in basis points
     pub liquidation_fee_bps: u32,
-    /// Fee discount tiers based on volume
+    // Percentage of trading fees routed to the referrer (e.g. 0.10 = 10%)
+    pub referral_fee_pct: Decimal,
+    // Fee discount tiers based on volume
     pub volume_discounts: Vec<VolumeDiscount>,
 }
 
@@ -72,6 +70,7 @@ impl Default for FeeConfig {
             maker_fee_bps: 2,  // 0.02%
             taker_fee_bps: 5,  // 0.05%
             liquidation_fee_bps: 50, // 0.5%
+            referral_fee_pct: Decimal::new(10, 2), // 10%
             volume_discounts: vec![
                 VolumeDiscount { min_volume: Decimal::new(1_000_000, 0), discount_pct: 10 },
                 VolumeDiscount { min_volume: Decimal::new(10_000_000, 0), discount_pct: 20 },
@@ -81,27 +80,27 @@ impl Default for FeeConfig {
     }
 }
 
-/// Volume based fee discount tier
+// Volume based fee discount tier
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VolumeDiscount {
-    /// Minimum 30 day volume to qualify
+    // Minimum 30 day volume to qualify
     pub min_volume: Decimal,
-    /// Discount percentage on fees
+    // Discount percentage on fees
     pub discount_pct: u32,
 }
 
-/// Price feed configuration
+// Price feed configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PriceFeedConfig {
-    /// Minimum number of sources for valid price
+    // Minimum number of sources for valid price
     pub min_sources: usize,
-    /// Maximum staleness in seconds
+    // Maximum staleness in seconds
     pub max_staleness_secs: u64,
-    /// Maximum deviation between sources
+    // Maximum deviation between sources
     pub max_deviation_pct: Decimal,
-    /// Use median (true) or weighted average
+    // Use median (true) or weighted average
     pub use_median: bool,
-    /// TWAP window in seconds
+    // TWAP window in seconds
     pub twap_window_secs: u64,
 }
 
@@ -117,14 +116,14 @@ impl Default for PriceFeedConfig {
     }
 }
 
-/// Liquidity pool configuration
+// Liquidity pool configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LiquidityConfig {
-    /// Maximum utilization ratio
+    // Maximum utilization ratio
     pub max_utilization: Decimal,
-    /// Maximum price impact allowed
+    // Maximum price impact allowed
     pub max_price_impact: Decimal,
-    /// Pool fee in basis points
+    // Pool fee in basis points
     pub pool_fee_bps: u32,
 }
 
@@ -138,7 +137,7 @@ impl Default for LiquidityConfig {
     }
 }
 
-/// The complete integration configuration
+// The complete integration configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IntegrationConfig {
     pub market: MarketConfig,
@@ -148,9 +147,9 @@ pub struct IntegrationConfig {
     pub fees: FeeConfig,
     pub price_feed: PriceFeedConfig,
     pub liquidity: LiquidityConfig,
-    /// Accepted collateral types and their weights
+    // Accepted collateral types and their weights
     pub collateral_weights: HashMap<CollateralType, Decimal>,
-    /// Insurance fund target (as ratio of OI)
+    // Insurance fund target (as ratio of OI)
     pub insurance_target_ratio: Decimal,
 }
 
@@ -176,7 +175,7 @@ impl Default for IntegrationConfig {
 }
 
 impl IntegrationConfig {
-    /// Create a configuration preset for testnet
+    // Create a configuration preset for testnet
     pub fn testnet() -> Self {
         let mut config = Self::default();
         config.market.name = "BTC-PERP Testnet".to_string();
@@ -187,7 +186,7 @@ impl IntegrationConfig {
         config
     }
 
-    /// Create a configuration preset for mainnet with conservative settings
+    // Create a configuration preset for mainnet with conservative settings
     pub fn mainnet_conservative() -> Self {
         let mut config = Self::default();
         config.margin.max_leverage = crate::types::Leverage::new(rust_decimal_macros::dec!(10)).unwrap(); // 10x max
@@ -198,7 +197,7 @@ impl IntegrationConfig {
         config
     }
 
-    /// Create a configuration for high frequency trading
+    // Create a configuration for high frequency trading
     pub fn hft_optimized() -> Self {
         let mut config = Self::default();
         config.fees.maker_fee_bps = -1; // maker rebate
@@ -208,7 +207,7 @@ impl IntegrationConfig {
         config
     }
 
-    /// Validate the configuration for internal consistency
+    // Validate the configuration for internal consistency
     pub fn validate(&self) -> Result<(), ConfigError> {
         // margin checks
         // maintenance_margin_ratio is multiplied by initial margin (1/leverage)
@@ -250,12 +249,12 @@ impl IntegrationConfig {
         Ok(())
     }
 
-    /// Calculate max leverage based on margin params
+    // Calculate max leverage based on margin params
     pub fn max_leverage(&self) -> Decimal {
         self.margin.max_leverage.value()
     }
 
-    /// Get collateral weight for a given type
+    // Get collateral weight for a given type
     pub fn collateral_weight(&self, collateral_type: CollateralType) -> Decimal {
         self.collateral_weights
             .get(&collateral_type)
@@ -264,7 +263,7 @@ impl IntegrationConfig {
     }
 }
 
-/// Configuration validation errors
+// Configuration validation errors
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConfigError {
     InvalidMargin { reason: String },
@@ -274,7 +273,7 @@ pub enum ConfigError {
     InvalidRisk { reason: String },
 }
 
-/// Environment presets
+// Environment presets
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Environment {

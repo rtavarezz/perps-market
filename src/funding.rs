@@ -1,9 +1,5 @@
-//! Funding rate calculation and settlement.
-//!
-//! Funding anchors perpetual contract price to the index through periodic
-//! payments between longs and shorts. When perp trades at premium, longs
-//! pay shorts. When at discount, shorts pay longs. The rate is clamped
-//! and dampened to prevent extreme swings.
+// 5.0: funding rates. every 8hrs longs pay shorts or vice versa to keep perp price near spot.
+// 5.0 has the params/state structs. 5.1 has the rate calculation logic.
 
 use crate::types::{Price, Quote, SignedSize, Timestamp};
 use rust_decimal::Decimal;
@@ -16,6 +12,9 @@ pub struct FundingParams {
     pub interest_rate: Decimal,
     pub period_hours: Decimal,
     pub dampening_factor: Decimal,
+    // fraction of gross funding routed to the LP pool (0.10 = 10%).
+    // payers pay full amount, receivers get (1 - this), remainder goes to pool.
+    pub lp_fee_fraction: Decimal,
 }
 
 impl Default for FundingParams {
@@ -25,6 +24,7 @@ impl Default for FundingParams {
             interest_rate: dec!(0.0001),
             period_hours: dec!(8),
             dampening_factor: dec!(0.5),
+            lp_fee_fraction: dec!(0.10),
         }
     }
 }
@@ -48,10 +48,12 @@ impl FundingState {
     }
 }
 
+// 5.1: how far perp is from spot. positive = perp above spot
 pub fn calculate_premium_index(mark_price: Price, index_price: Price) -> Decimal {
     (mark_price.value() - index_price.value()) / index_price.value()
 }
 
+// 5.2: dampens and clamps the rate to prevent wild swings
 pub fn calculate_funding_rate(premium_index: Decimal, params: &FundingParams) -> Decimal {
     let dampened_premium = premium_index * params.dampening_factor;
     let rate = dampened_premium + params.interest_rate;
@@ -66,6 +68,7 @@ pub fn calculate_accrued_funding(
     funding_rate * hours_elapsed / period_hours
 }
 
+// 5.3: how much you pay/receive. size * price * rate
 pub fn calculate_funding_payment(
     position_size: SignedSize,
     mark_price: Price,
@@ -84,6 +87,7 @@ pub fn calculate_funding_from_cumulative(
     Quote::new(position_size.value() * funding_delta)
 }
 
+// 5.4: updates funding state with new rate and cumulative amount
 pub fn update_funding_state(
     state: &FundingState,
     mark_price: Price,

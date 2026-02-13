@@ -1,8 +1,8 @@
-//! Order management and execution.
+// 8.1 engine/orders.rs: order submission and matching logic lives here.
 
 use super::core::Engine;
 use super::results::{EngineError, OrderResult};
-use crate::events::{CancelReason, EventPayload, FillEvent, OrderCanceledEvent, OrderPlacedEvent};
+use crate::events::{CancelReason, EventPayload, FillEvent, OiUpdatedEvent, OrderCanceledEvent, OrderPlacedEvent};
 use crate::margin::calculate_margin_requirement;
 use crate::market::MarketConfig;
 use crate::order::{match_order, Fill, Order, TimeInForce, OrderType};
@@ -10,14 +10,13 @@ use crate::types::{AccountId, MarketId, OrderId, Price, Quote, Side, SignedSize}
 use rust_decimal::Decimal;
 
 impl Engine {
-    /// Generate a new order ID.
     fn next_order_id(&mut self) -> OrderId {
         let id = OrderId(self.next_order_id);
         self.next_order_id += 1;
         id
     }
 
-    /// Place a market order.
+    /** 8.2: submit market order. executes immediately at best price */
     pub fn place_market_order(
         &mut self,
         account_id: AccountId,
@@ -64,7 +63,7 @@ impl Engine {
         self.execute_order(order)
     }
 
-    /// Place a limit order.
+    /** 8.3: submit limit order. sits on book until filled or canceled */
     pub fn place_limit_order(
         &mut self,
         account_id: AccountId,
@@ -116,7 +115,6 @@ impl Engine {
         self.execute_order(order)
     }
 
-    /// Cancel an order.
     pub fn cancel_order(&mut self, market_id: MarketId, order_id: OrderId) -> Result<(), EngineError> {
         let market = self
             .markets
@@ -138,7 +136,7 @@ impl Engine {
         Ok(())
     }
 
-    /// Execute an order by matching against the book and updating positions.
+    // 8.4: match against book, update positions, emit fills
     fn execute_order(&mut self, order: Order) -> Result<OrderResult, EngineError> {
         let market_id = order.market_id;
         let account_id = order.account_id;
@@ -170,7 +168,7 @@ impl Engine {
         for fill in fill_events {
             self.process_fill(&fill, &market_config)?;
         }
-
+        // order is partially filled even though order is closed
         let remaining = match_result.remaining_size;
         let order_posted = if !remaining.is_zero() {
             match order_type {
@@ -235,7 +233,6 @@ impl Engine {
         })
     }
 
-    /// Check if account has enough margin for a resting order.
     fn check_margin_for_order(
         &self,
         account_id: AccountId,
@@ -270,8 +267,52 @@ impl Engine {
         Ok(account.balance.value() >= margin_req.initial.value())
     }
 
-    /// Process a fill by updating positions for both maker and taker.
+    // 8.5: process fill: update positions, apply fees, route referral cuts
     fn process_fill(&mut self, fill: &Fill, config: &MarketConfig) -> Result<(), EngineError> {
+        let notional = fill.size * fill.price.value();
+
+        // --- calculate fees ---
+        let taker_fee_bps = self.config.fees.taker_fee_bps;
+        let maker_fee_bps = self.config.fees.maker_fee_bps;
+        let referral_pct = self.config.fees.referral_fee_pct;
+
+        let taker_fee = Quote::new(notional * Decimal::from(taker_fee_bps) / Decimal::from(10_000));
+        let maker_fee = Quote::new(notional * Decimal::from(maker_fee_bps) / Decimal::from(10_000));
+
+        // --- deduct taker fee ---
+        {
+            let taker = self.accounts.get_mut(&fill.taker_account_id)
+                .ok_or(EngineError::AccountNotFound(fill.taker_account_id))?;
+            taker.deduct_fee(taker_fee);
+            taker.trading_volume_30d += notional;
+
+            // route referral cut
+            if let Some(referrer_id) = taker.referrer {
+                let referral_amount = Quote::new(taker_fee.value() * referral_pct);
+                if let Some(referrer) = self.accounts.get_mut(&referrer_id) {
+                    referrer.balance = referrer.balance.add(referral_amount);
+                }
+            }
+        }
+
+        // --- deduct maker fee (can be negative = rebate) ---
+        {
+            let maker = self.accounts.get_mut(&fill.maker_account_id)
+                .ok_or(EngineError::AccountNotFound(fill.maker_account_id))?;
+            maker.deduct_fee(maker_fee); // negative fee adds to balance
+            maker.trading_volume_30d += notional;
+
+            if let Some(referrer_id) = maker.referrer {
+                if maker_fee_bps > 0 {
+                    let referral_amount = Quote::new(maker_fee.value() * referral_pct);
+                    if let Some(referrer) = self.accounts.get_mut(&referrer_id) {
+                        referrer.balance = referrer.balance.add(referral_amount);
+                    }
+                }
+            }
+        }
+
+        // --- update positions ---
         self.update_position_for_fill(
             fill.taker_account_id,
             config,
@@ -293,6 +334,7 @@ impl Engine {
             fill.price,
         )?;
 
+        // --- emit fill events with fees ---
         self.emit_event(EventPayload::Fill(FillEvent {
             market_id: config.id,
             order_id: fill.taker_order_id,
@@ -300,7 +342,7 @@ impl Engine {
             side: fill.taker_side,
             size: fill.size,
             price: fill.price,
-            fee: Quote::zero(),
+            fee: taker_fee,
             is_maker: false,
         }));
 
@@ -311,8 +353,17 @@ impl Engine {
             side: maker_side,
             size: fill.size,
             price: fill.price,
-            fee: Quote::zero(),
+            fee: maker_fee,
             is_maker: true,
+        }));
+
+        // --- emit OI snapshot ---
+        let market = self.markets.get(&config.id).unwrap();
+        self.emit_event(EventPayload::OiUpdated(OiUpdatedEvent {
+            market_id: config.id,
+            long_oi: market.open_interest_long,
+            short_oi: market.open_interest_short,
+            total_oi: market.open_interest_long.max(market.open_interest_short),
         }));
 
         Ok(())
