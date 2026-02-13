@@ -1,8 +1,6 @@
-//! Core trading engine.
-//!
-//! The engine coordinates order execution, position management, price updates,
-//! funding settlements, and liquidation checks. Designed to be deterministic
-//! and event driven with no external I/O dependencies.
+// 8.0: core trading engine. coordinates order execution, position management,
+// price updates, funding settlements, and liquidation checks.
+// deterministic and event-driven with no external I/O.
 
 mod config;
 mod core;

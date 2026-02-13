@@ -1,4 +1,4 @@
-//! Price update operations.
+// 8.7: price update operations. oracle → index price → mark price.
 
 use super::core::Engine;
 use super::results::EngineError;
@@ -7,7 +7,6 @@ use crate::mark_price::{update_mark_price, MarkPriceState};
 use crate::types::{MarketId, Price};
 
 impl Engine {
-    /// Update the index price from oracle.
     pub fn update_index_price(
         &mut self,
         market_id: MarketId,
@@ -31,7 +30,6 @@ impl Engine {
         Ok(())
     }
 
-    /// Update the mark price based on current state.
     fn update_mark_price(&mut self, market_id: MarketId) -> Result<(), EngineError> {
         let market = self
             .markets

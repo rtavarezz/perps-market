@@ -1,4 +1,4 @@
-//! Position management for fills.
+// 8.6: position management for fills. increase, reduce, flip, or open new.
 
 use super::core::Engine;
 use super::results::EngineError;
@@ -12,7 +12,6 @@ use crate::types::{AccountId, Price, Quote, Side, SignedSize};
 use rust_decimal::Decimal;
 
 impl Engine {
-    /// Update a position based on a fill.
     pub(super) fn update_position_for_fill(
         &mut self,
         account_id: AccountId,
