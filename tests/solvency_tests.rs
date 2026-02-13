@@ -15,8 +15,15 @@ proptest! {
         num_traders in 2..20usize,
         trade_sizes in proptest::collection::vec(1i64..100i64, 2..20),
     ) {
-        let mut engine = Engine::new(EngineConfig::default());
-        engine.add_market(MarketConfig::btc_perp());
+        let mut config = EngineConfig::default();
+        config.fees.maker_fee_bps = 0;
+        config.fees.taker_fee_bps = 0;
+        config.fees.referral_fee_pct = Decimal::ZERO;
+
+        let mut engine = Engine::new(config);
+        let mut market = MarketConfig::btc_perp();
+        market.funding_params.lp_fee_fraction = Decimal::ZERO;
+        engine.add_market(market);
 
         let entry_price = dec!(50000);
         engine.update_index_price(MarketId(1), Price::new_unchecked(entry_price)).unwrap();
@@ -70,7 +77,12 @@ proptest! {
         initial_price in 40000i64..60000i64,
         price_changes in proptest::collection::vec(-5000i64..5000i64, 1..10),
     ) {
-        let mut engine = Engine::new(EngineConfig::default());
+        let mut config = EngineConfig::default();
+        config.fees.maker_fee_bps = 0;
+        config.fees.taker_fee_bps = 0;
+        config.fees.referral_fee_pct = Decimal::ZERO;
+
+        let mut engine = Engine::new(config);
         engine.add_market(MarketConfig::btc_perp());
         engine.fund_insurance(Quote::new(dec!(100_000)));
 
@@ -139,8 +151,15 @@ proptest! {
         num_shorts in 1..5usize,
         premium_bps in -100i32..100i32,
     ) {
-        let mut engine = Engine::new(EngineConfig::default());
-        engine.add_market(MarketConfig::btc_perp());
+        let mut config = EngineConfig::default();
+        config.fees.maker_fee_bps = 0;
+        config.fees.taker_fee_bps = 0;
+        config.fees.referral_fee_pct = Decimal::ZERO;
+
+        let mut engine = Engine::new(config);
+        let mut market = MarketConfig::btc_perp();
+        market.funding_params.lp_fee_fraction = Decimal::ZERO;
+        engine.add_market(market);
 
         let mark = dec!(50000) + Decimal::from(premium_bps);
         let index = dec!(50000);
@@ -223,7 +242,12 @@ mod deterministic_solvency {
 
     #[test]
     fn insurance_fund_covers_bad_debt() {
-        let mut engine = Engine::new(EngineConfig::default());
+        let mut config = EngineConfig::default();
+        config.fees.maker_fee_bps = 0;
+        config.fees.taker_fee_bps = 0;
+        config.fees.referral_fee_pct = Decimal::ZERO;
+
+        let mut engine = Engine::new(config);
         engine.add_market(MarketConfig::btc_perp());
         engine.fund_insurance(Quote::new(dec!(50_000)));
 
@@ -418,10 +442,14 @@ mod deterministic_solvency {
 
         let balance_after_close = engine.get_account(trader).unwrap().balance.value();
 
-        // Collateral should be returned (balance increases by locked amount, minus the loss from spread)
+        // Collateral should be returned (balance increases by locked amount,
+        // minus the loss from spread and taker fees on both legs)
         // Entry was at 50100, exit at 49900, so loss = 200
         let returned = balance_after_close - balance_after_open;
-        let expected_return = collateral_locked - dec!(200);  // Minus the loss from spread
+        let fee_bps = crate::config::FeeConfig::default().taker_fee_bps;
+        let close_fee = dec!(49900) * dec!(1) * Decimal::from(fee_bps) / dec!(10_000);
+        // balance_after_open already includes the open fee, so only subtract close fee here
+        let expected_return = collateral_locked - dec!(200) - close_fee;
         assert!(
             (returned - expected_return).abs() < dec!(1),
             "Collateral not properly handled: locked={}, returned={}, expected_return={}",

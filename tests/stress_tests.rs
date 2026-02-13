@@ -14,7 +14,9 @@ mod cascade_tests {
     #[test]
     fn liquidation_cascade_no_bad_debt() {
         let mut engine = Engine::new(EngineConfig::default());
-        engine.add_market(MarketConfig::btc_perp());
+        let mut market = MarketConfig::btc_perp();
+        market.funding_params.lp_fee_fraction = Decimal::ZERO;
+        engine.add_market(market);
         engine.fund_insurance(Quote::new(dec!(1_000_000)));
 
         let entry_price = dec!(50000);
@@ -462,7 +464,9 @@ mod funding_tests {
     #[test]
     fn funding_with_zero_positions() {
         let mut engine = Engine::new(EngineConfig::default());
-        engine.add_market(MarketConfig::btc_perp());
+        let mut market = MarketConfig::btc_perp();
+        market.funding_params.lp_fee_fraction = Decimal::ZERO;
+        engine.add_market(market);
 
         engine
             .update_index_price(MarketId(1), Price::new_unchecked(dec!(50000)))
@@ -478,7 +482,9 @@ mod funding_tests {
     #[test]
     fn funding_preserves_zero_sum() {
         let mut engine = Engine::new(EngineConfig::default());
-        engine.add_market(MarketConfig::btc_perp());
+        let mut market = MarketConfig::btc_perp();
+        market.funding_params.lp_fee_fraction = Decimal::ZERO;
+        engine.add_market(market);
 
         // Create traders with separate long and short positions
         let long1 = engine.create_account();
@@ -545,7 +551,9 @@ mod funding_tests {
     #[test]
     fn funding_multiple_periods() {
         let mut engine = Engine::new(EngineConfig::default());
-        engine.add_market(MarketConfig::btc_perp());
+        let mut market = MarketConfig::btc_perp();
+        market.funding_params.lp_fee_fraction = Decimal::ZERO;
+        engine.add_market(market);
 
         let long_trader = engine.create_account();
         let short_trader = engine.create_account();
