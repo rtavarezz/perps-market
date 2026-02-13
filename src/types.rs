@@ -1,7 +1,5 @@
-//! Core types for the perpetual DEX engine.
-//!
-//! All monetary values use `Decimal` for 28 digit precision.
-//! Sizes are signed, positive for long and negative for short.
+// 1.0: all the primitives live here. nothing in the engine works without these types.
+// IDs, prices, sizes, leverage, timestamps. each is a newtype so the compiler catches type mixups.
 
 use rust_decimal::Decimal;
 use std::iter::Sum;
@@ -9,19 +7,16 @@ use rust_decimal_macros::dec;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-/// Market identifier
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct MarketId(pub u32);
 
-/// Account identifier
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct AccountId(pub u64);
 
-/// Unique order identifier
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct OrderId(pub u64);
 
-/// Position side
+// Long = profit when price goes up. Short = profit when price goes down.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Side {
     Long,
@@ -44,7 +39,7 @@ impl Side {
     }
 }
 
-/// Signed size where positive is long and negative is short.
+// 1.1: signed size: positive = long, negative = short. core to all position math.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SignedSize(Decimal);
 
@@ -102,7 +97,7 @@ impl fmt::Display for SignedSize {
     }
 }
 
-/// Price in quote currency per unit of base.
+// 1.2: price in quote currency per unit of base. must be positive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Price(Decimal);
 
@@ -132,7 +127,7 @@ impl fmt::Display for Price {
     }
 }
 
-/// Quote currency amount for collateral, margin, and PnL.
+// 1.3: quote currency amount. collateral, margin, pnl, fees all use this.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Quote(Decimal);
 
@@ -204,7 +199,7 @@ impl<'a> Sum<&'a Quote> for Quote {
     }
 }
 
-/// Leverage multiplier.
+// 1.4: leverage multiplier. must be >= 1x.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Leverage(Decimal);
 
@@ -222,6 +217,7 @@ impl Leverage {
         self.0
     }
 
+    // 10x leverage → 10% margin fraction (1/10)
     pub fn initial_margin_fraction(&self) -> Decimal {
         Decimal::ONE / self.0
     }
@@ -233,7 +229,7 @@ impl fmt::Display for Leverage {
     }
 }
 
-/// Basis points where 1 bp equals 0.01 percent.
+// 1.5: basis points. 100 bps = 1%.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Bps(i32);
 
@@ -251,7 +247,7 @@ impl Bps {
     }
 }
 
-/// Timestamp in milliseconds since epoch.
+// 1.6: millisecond timestamp.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Timestamp(pub i64);
 

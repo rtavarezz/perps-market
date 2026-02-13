@@ -1,11 +1,5 @@
-//! Margin calculation for initial and maintenance requirements.
-//!
-//! Initial margin (IM) is required to open a position, calculated as
-//! notional value divided by leverage. Maintenance margin (MM) is the
-//! minimum to keep a position open, typically 50% of IM.
-//!
-//! Leverage tiers reduce max leverage as position size grows to limit
-//! protocol risk from large positions.
+// 3.0: margin math. IM (initial margin) to open, MM (maintenance margin) to keep alive.
+// drop below MM = liquidation. 3.1 has leverage tiers, bigger positions get less leverage.
 
 use crate::types::{Leverage, Price, Quote, SignedSize};
 use rust_decimal::Decimal;
@@ -59,10 +53,12 @@ pub struct MarginRequirement {
     pub effective_leverage: Leverage,
 }
 
+/** 3.2: converts position size to dollar value */
 pub fn notional_value(size: SignedSize, price: Price) -> Quote {
     Quote::new(size.abs() * price.value())
 }
 
+/** 3.3: looks up max leverage based on position size tiers */
 pub fn effective_max_leverage(notional: Quote, params: &MarginParams) -> Leverage {
     for tier in &params.leverage_tiers {
         if notional.value() <= tier.max_notional.value() {
@@ -76,6 +72,7 @@ pub fn effective_max_leverage(notional: Quote, params: &MarginParams) -> Leverag
         .unwrap_or(params.max_leverage)
 }
 
+/** 3.4: main margin calc. returns IM, MM, and effective leverage */
 pub fn calculate_margin_requirement(
     size: SignedSize,
     mark_price: Price,
@@ -108,6 +105,7 @@ pub enum MarginStatus {
     Liquidatable,
 }
 
+// 3.1: checks if account is healthy, warning zone, or liquidatable
 pub fn evaluate_margin_status(
     account_equity: Quote,
     margin_req: &MarginRequirement,
@@ -121,6 +119,7 @@ pub fn evaluate_margin_status(
     }
 }
 
+// equity / notional. higher ratio = safer position
 pub fn margin_ratio(equity: Quote, notional: Quote) -> Decimal {
     if notional.value().is_zero() {
         return Decimal::MAX;
@@ -128,7 +127,7 @@ pub fn margin_ratio(equity: Quote, notional: Quote) -> Decimal {
     equity.value() / notional.value()
 }
 
-/// Calculate free margin (equity available for new positions)
+// equity available for opening new positions
 pub fn free_margin(account_equity: Quote, margin_used: Quote) -> Quote {
     Quote::new(account_equity.value() - margin_used.value())
 }

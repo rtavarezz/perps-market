@@ -1,25 +1,21 @@
-// Price Feed Integration
-//
-// This module abstracts how the engine receives price updates. The core engine
-// is agnostic to whether prices come from Pyth, Chainlink, a CEX aggregator,
-// or a custom oracle. We define traits and types that any price source can implement.
+// 9.0 price_feed.rs: MOCKED. uses fake data, would need pyth/chainlink in prod.
 
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 
-/// Unique identifier for a price source
+// Unique identifier for a price source
 pub type PriceSourceId = u32;
 
-/// A single price update from an oracle or feed
+// A single price update from an oracle or feed
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PriceUpdate {
     pub price: Decimal,
     pub timestamp: u64,
     pub source_id: PriceSourceId,
-    /// Confidence interval (if provided by source like Pyth)
+    // Confidence interval (if provided by source like Pyth)
     pub confidence: Option<Decimal>,
-    /// Time to live in seconds before this price is considered stale
+    // Time to live in seconds before this price is considered stale
     pub ttl_seconds: u64,
 }
 
@@ -49,18 +45,18 @@ impl PriceUpdate {
     }
 }
 
-/// Configuration for price feed aggregation
+// Configuration for price feed aggregation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PriceFeedConfig {
-    /// Minimum number of sources required for a valid price
+    // Minimum number of sources required for a valid price
     pub min_sources: usize,
-    /// Maximum age in seconds before a price is considered stale
+    // Maximum age in seconds before a price is considered stale
     pub max_staleness_seconds: u64,
-    /// Maximum deviation between sources before rejecting (as ratio, e.g. 0.01 = 1%)
+    // Maximum deviation between sources before rejecting (as ratio, e.g. 0.01 = 1%)
     pub max_source_deviation: Decimal,
-    /// Whether to use median (true) or weighted average (false)
+    // Whether to use median (true) or weighted average (false)
     pub use_median: bool,
-    /// Weight assigned to each source (source_id -> weight)
+    // Weight assigned to each source (source_id -> weight)
     pub source_weights: Vec<(PriceSourceId, Decimal)>,
 }
 
@@ -76,7 +72,7 @@ impl Default for PriceFeedConfig {
     }
 }
 
-/// Errors that can occur during price aggregation
+// Errors that can occur during price aggregation
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PriceFeedError {
     InsufficientSources { required: usize, available: usize },
@@ -85,14 +81,14 @@ pub enum PriceFeedError {
     NoPriceAvailable,
 }
 
-/// Aggregates prices from multiple sources into a single reliable price.
-/// This handles the complexity of combining Pyth, Chainlink, CEX feeds, etc.
+// Aggregates prices from multiple sources into a single reliable price.
+// This handles the complexity of combining Pyth, Chainlink, CEX feeds, etc.
 #[derive(Debug, Clone)]
 pub struct PriceAggregator {
     config: PriceFeedConfig,
-    /// Recent prices from each source (source_id -> price history)
+    // Recent prices from each source (source_id -> price history)
     source_prices: Vec<(PriceSourceId, VecDeque<PriceUpdate>)>,
-    /// Maximum history per source
+    // Maximum history per source
     max_history: usize,
 }
 
@@ -105,14 +101,14 @@ impl PriceAggregator {
         }
     }
 
-    /// Register a new price source
+    // Register a new price source
     pub fn add_source(&mut self, source_id: PriceSourceId) {
         if !self.source_prices.iter().any(|(id, _)| *id == source_id) {
             self.source_prices.push((source_id, VecDeque::new()));
         }
     }
 
-    /// Submit a price update from a source
+    // Submit a price update from a source
     pub fn submit_price(&mut self, update: PriceUpdate) {
         // find or create the source entry
         let entry = self.source_prices
@@ -131,7 +127,7 @@ impl PriceAggregator {
         }
     }
 
-    /// Get the aggregated price at the given timestamp
+    // Get the aggregated price at the given timestamp
     pub fn get_price(&self, current_time: u64) -> Result<PriceUpdate, PriceFeedError> {
         // collect fresh prices from each source
         let mut fresh_prices: Vec<(PriceSourceId, Decimal)> = Vec::new();
@@ -226,7 +222,7 @@ impl PriceAggregator {
         }
     }
 
-    /// Get the latest price from a specific source
+    // Get the latest price from a specific source
     pub fn get_source_price(&self, source_id: PriceSourceId) -> Option<&PriceUpdate> {
         self.source_prices
             .iter()
@@ -234,29 +230,29 @@ impl PriceAggregator {
             .and_then(|(_, history)| history.back())
     }
 
-    /// Get all source IDs
+    // Get all source IDs
     pub fn sources(&self) -> Vec<PriceSourceId> {
         self.source_prices.iter().map(|(id, _)| *id).collect()
     }
 }
 
-/// Trait for price feed adapters. Implement this to integrate with specific
-/// oracle networks or data sources.
+// Trait for price feed adapters. Implement this to integrate with specific
+// oracle networks or data sources.
 pub trait PriceFeedAdapter {
-    /// Unique identifier for this adapter
+    // Unique identifier for this adapter
     fn source_id(&self) -> PriceSourceId;
 
-    /// Human readable name
+    // Human readable name
     fn name(&self) -> &str;
 
-    /// Fetch the latest price (could be async in real implementation)
+    // Fetch the latest price (could be async in real implementation)
     fn fetch_price(&self) -> Option<PriceUpdate>;
 
-    /// Check if the adapter is healthy/connected
+    // Check if the adapter is healthy/connected
     fn is_healthy(&self) -> bool;
 }
 
-/// Mock adapter for testing
+// Mock adapter for testing
 pub struct MockPriceFeed {
     source_id: PriceSourceId,
     name: String,
@@ -305,14 +301,14 @@ impl PriceFeedAdapter for MockPriceFeed {
     }
 }
 
-/// TWAP (Time Weighted Average Price) calculator for mark price
+// TWAP (Time Weighted Average Price) calculator for mark price
 #[derive(Debug, Clone)]
 pub struct TwapCalculator {
-    /// Price samples with timestamps
+    // Price samples with timestamps
     samples: VecDeque<(u64, Decimal)>,
-    /// Window size in seconds
+    // Window size in seconds
     window_seconds: u64,
-    /// Max samples to keep
+    // Max samples to keep
     max_samples: usize,
 }
 

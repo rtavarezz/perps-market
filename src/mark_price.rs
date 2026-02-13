@@ -1,8 +1,5 @@
-//! Mark price derivation from index price.
-//!
-//! Mark price is used for PnL calculation, margin requirements, and liquidation.
-//! It blends index price with order book mid price using clamped premium and
-//! EMA smoothing to resist manipulation while reflecting local liquidity.
+// 13.0: mark price derivation. blends index price with order book mid price.
+// uses clamped premium (±5% max) and EMA smoothing to resist manipulation.
 
 use crate::types::{Price, Quote};
 use rust_decimal::Decimal;
@@ -97,8 +94,7 @@ pub fn update_mark_price(
     }
 }
 
-/// Calculate impact price for large order (simplified model)
-/// This estimates execution price including slippage
+// 13.1: estimate execution price for a large order, including slippage
 pub fn estimate_impact_price(
     mark_price: Price,
     size: Decimal,

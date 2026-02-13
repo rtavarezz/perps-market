@@ -1,23 +1,18 @@
-//! Order types and order book implementation.
-//!
-//! Minimal order matching for perpetual futures. Supports limit orders with
-//! price-time priority and market orders that execute immediately.
+// 2.0: order book. this is CLOB, not AMM. traders match against each other.
+// 2.0 has the structs (Order, OrderBook, TimeInForce).
+// 2.1 has the matching engine logic at the bottom of this file.
 
 use crate::types::{AccountId, MarketId, OrderId, Price, Side, Timestamp};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-/// Order time in force options.
+// GTC stays on book, IOC fills or cancels remainder, FOK all-or-nothing, PostOnly rejects if it would take.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TimeInForce {
-    /// Good till canceled. Remains on book until filled or canceled.
     GTC,
-    /// Immediate or cancel. Fill what is possible, cancel the rest.
     IOC,
-    /// Fill or kill. Fill entirely or cancel entirely.
     FOK,
-    /// Post only. Reject if would take liquidity.
     PostOnly,
 }
 
@@ -27,16 +22,12 @@ impl Default for TimeInForce {
     }
 }
 
-/// Order type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum OrderType {
-    /// Limit order with specified price.
     Limit,
-    /// Market order. Executes at best available price.
     Market,
 }
 
-/// A trading order
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Order {
     pub id: OrderId,
@@ -122,7 +113,7 @@ impl Order {
     }
 }
 
-/// Order priority key for price-time ordering
+// priority key for price-time ordering in the book
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct OrderKey {
     price: Price,
@@ -156,7 +147,7 @@ impl Ord for OrderKey {
     }
 }
 
-/// A single price level in the order book
+// aggregated view of a single price level
 #[derive(Debug, Clone)]
 pub struct PriceLevel {
     pub price: Price,
@@ -164,7 +155,7 @@ pub struct PriceLevel {
     pub order_count: usize,
 }
 
-/// Central Limit Order Book (CLOB)
+// 2.0: the order book. bids (buys) and asks (sells) stored in sorted BTreeMaps.
 #[derive(Debug, Clone)]
 pub struct OrderBook {
     pub market_id: MarketId,
@@ -186,17 +177,16 @@ impl OrderBook {
         }
     }
 
-    /// Get the best bid price (highest buy order)
+    // highest buy price on the book
     pub fn best_bid(&self) -> Option<Price> {
         self.bids.iter().next_back().map(|(k, _)| k.price)
     }
 
-    /// Get the best ask price (lowest sell order)
+    // lowest sell price on the book
     pub fn best_ask(&self) -> Option<Price> {
         self.asks.iter().next().map(|(k, _)| k.price)
     }
 
-    /// Get the mid price (average of best bid and ask)
     pub fn mid_price(&self) -> Option<Price> {
         match (self.best_bid(), self.best_ask()) {
             (Some(bid), Some(ask)) => {
@@ -207,7 +197,6 @@ impl OrderBook {
         }
     }
 
-    /// Get the spread between best bid and ask
     pub fn spread(&self) -> Option<Decimal> {
         match (self.best_bid(), self.best_ask()) {
             (Some(bid), Some(ask)) => Some(ask.value() - bid.value()),
@@ -215,7 +204,7 @@ impl OrderBook {
         }
     }
 
-    /// Insert an order into the book
+    // adds a limit order to the book
     pub fn insert(&mut self, order: Order) {
         let price = order.price.expect("limit order must have price");
         let key = OrderKey::new(price, order.created_at, order.id);
@@ -233,7 +222,6 @@ impl OrderBook {
         }
     }
 
-    /// Remove an order from the book by ID
     pub fn remove(&mut self, order_id: OrderId) -> Option<Order> {
         if let Some((side, key)) = self.order_index.remove(&order_id) {
             match side {
@@ -245,7 +233,6 @@ impl OrderBook {
         }
     }
 
-    /// Get an order by ID
     pub fn get(&self, order_id: OrderId) -> Option<&Order> {
         if let Some((side, key)) = self.order_index.get(&order_id) {
             match side {
@@ -257,7 +244,6 @@ impl OrderBook {
         }
     }
 
-    /// Get mutable reference to an order by ID
     pub fn get_mut(&mut self, order_id: OrderId) -> Option<&mut Order> {
         if let Some((side, key)) = self.order_index.get(&order_id).cloned() {
             match side {
@@ -269,7 +255,6 @@ impl OrderBook {
         }
     }
 
-    /// Get the best bid orders up to a certain depth
     pub fn top_bids(&self, depth: usize) -> Vec<&Order> {
         // For bids: highest price is best, but at same price, earlier time is better
         // BTreeMap orders by OrderKey (price asc, then time asc)
@@ -284,12 +269,10 @@ impl OrderBook {
         bids.into_iter().take(depth).collect()
     }
 
-    /// Get the best ask orders up to a certain depth
     pub fn top_asks(&self, depth: usize) -> Vec<&Order> {
         self.asks.values().take(depth).collect()
     }
 
-    /// Get bid depth at each price level
     pub fn bid_levels(&self, max_levels: usize) -> Vec<PriceLevel> {
         let mut levels: Vec<PriceLevel> = Vec::new();
         let mut current_price: Option<Price> = None;
@@ -315,7 +298,6 @@ impl OrderBook {
         levels
     }
 
-    /// Get ask depth at each price level
     pub fn ask_levels(&self, max_levels: usize) -> Vec<PriceLevel> {
         let mut levels: Vec<PriceLevel> = Vec::new();
         let mut current_price: Option<Price> = None;
@@ -380,8 +362,8 @@ pub struct Fill {
     pub taker_side: Side,
 }
 
-/// Match an incoming order against the order book
-/// Returns fills and any remaining unfilled size
+// 2.1: the matching engine. takes an incoming order, walks the book, produces fills.
+// FIRST checks opposing side for crossable prices, THEN fills at maker’s price (price improvement for taker).
 pub fn match_order(book: &mut OrderBook, mut order: Order) -> MatchResult {
     let mut fills = Vec::new();
 

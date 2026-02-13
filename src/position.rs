@@ -1,7 +1,5 @@
-//! Position tracking and PnL calculation.
-//!
-//! A position represents an open leveraged exposure in a market with signed
-//! size, average entry price, isolated collateral, and funding index tracking.
+// 4.0: open position tracking. pnl = size * (mark - entry).
+// 4.1 has increase/reduce/flip logic at the bottom.
 
 use crate::types::{Leverage, MarketId, Price, Quote, Side, SignedSize, Timestamp};
 use rust_decimal::Decimal;
@@ -52,6 +50,7 @@ impl Position {
         self.size.side()
     }
 
+    // 4.1: paper gains/losses based on current price
     pub fn unrealized_pnl(&self, mark_price: Price) -> Quote {
         calculate_unrealized_pnl(self.size, self.entry_price, mark_price)
     }
@@ -61,6 +60,7 @@ impl Position {
         Quote::new(self.size.value() * funding_delta)
     }
 
+    // 4.2: collateral + pnl - funding. this vs MM determines liquidation
     pub fn equity(&self, mark_price: Price, current_funding_index: Decimal) -> Quote {
         let pnl = self.unrealized_pnl(mark_price);
         let funding = self.pending_funding(current_funding_index);
@@ -76,6 +76,7 @@ impl Position {
     }
 }
 
+// 4.3: the pnl formula. size * (mark - entry)
 pub fn calculate_unrealized_pnl(
     size: SignedSize,
     entry_price: Price,
@@ -102,6 +103,7 @@ pub struct PositionUpdate {
     pub collateral_required: Quote,
 }
 
+// 4.4: adds to existing position. averages the entry price
 pub fn increase_position(
     position: &Position,
     delta_size: Decimal,

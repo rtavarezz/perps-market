@@ -1,9 +1,4 @@
-// Deposit/Withdrawal and Custody Flows
-//
-// This module handles the movement of collateral in and out of the trading engine.
-// It abstracts over different custody models: on chain smart contracts, CEX style
-// hot/cold wallets, or hybrid approaches. The engine doesn't care where funds live,
-// it just needs to know balances and get notified of deposits/withdrawals.
+// 9.2 custody.rs: MOCKED. just balance changes, no real token transfers.
 
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -11,10 +6,10 @@ use std::collections::HashMap;
 
 use crate::types::AccountId;
 
-/// Unique identifier for a deposit/withdrawal transaction
+// Unique identifier for a deposit/withdrawal transaction
 pub type TxId = String;
 
-/// Supported collateral types
+// Supported collateral types
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CollateralType {
@@ -47,7 +42,7 @@ impl CollateralType {
     }
 }
 
-/// Status of a deposit or withdrawal
+// Status of a deposit or withdrawal
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TransferStatus {
@@ -58,7 +53,7 @@ pub enum TransferStatus {
     Cancelled,
 }
 
-/// A deposit request from external source to the engine
+// A deposit request from external source to the engine
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DepositRequest {
     pub tx_id: TxId,
@@ -69,7 +64,7 @@ pub struct DepositRequest {
     pub status: TransferStatus,
     pub created_at: u64,
     pub confirmed_at: Option<u64>,
-    /// Number of blockchain confirmations (for on chain deposits)
+    // Number of blockchain confirmations (for on chain deposits)
     pub confirmations: u32,
     pub required_confirmations: u32,
 }
@@ -120,7 +115,7 @@ impl DepositRequest {
     }
 }
 
-/// A withdrawal request from the engine to external destination
+// A withdrawal request from the engine to external destination
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WithdrawalRequest {
     pub tx_id: TxId,
@@ -131,7 +126,7 @@ pub struct WithdrawalRequest {
     pub status: TransferStatus,
     pub created_at: u64,
     pub processed_at: Option<u64>,
-    /// Fee charged for the withdrawal
+    // Fee charged for the withdrawal
     pub fee: Decimal,
 }
 
@@ -167,7 +162,7 @@ impl WithdrawalRequest {
     }
 }
 
-/// Errors from custody operations
+// Errors from custody operations
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CustodyError {
     InsufficientBalance { available: Decimal, requested: Decimal },
@@ -179,18 +174,18 @@ pub enum CustodyError {
     UnsupportedCollateral { collateral_type: CollateralType },
 }
 
-/// Configuration for custody operations
+// Configuration for custody operations
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CustodyConfig {
-    /// Minimum deposit amount per collateral type
+    // Minimum deposit amount per collateral type
     pub min_deposits: HashMap<CollateralType, Decimal>,
-    /// Maximum withdrawal per request
+    // Maximum withdrawal per request
     pub max_withdrawal: Decimal,
-    /// Withdrawal fee (flat)
+    // Withdrawal fee (flat)
     pub withdrawal_fee: Decimal,
-    /// Required confirmations per collateral type
+    // Required confirmations per collateral type
     pub confirmation_requirements: HashMap<CollateralType, u32>,
-    /// Cooldown period after deposit before withdrawal (seconds)
+    // Cooldown period after deposit before withdrawal (seconds)
     pub withdrawal_cooldown: u64,
 }
 
@@ -215,20 +210,20 @@ impl Default for CustodyConfig {
     }
 }
 
-/// Manages custody operations for the engine.
-/// This is the bridge between external funds and internal engine balances.
+// Manages custody operations for the engine.
+// This is the bridge between external funds and internal engine balances.
 #[derive(Debug)]
 pub struct CustodyManager {
     config: CustodyConfig,
-    /// Pending deposits by tx_id
+    // Pending deposits by tx_id
     pending_deposits: HashMap<TxId, DepositRequest>,
-    /// Pending withdrawals by tx_id
+    // Pending withdrawals by tx_id
     pending_withdrawals: HashMap<TxId, WithdrawalRequest>,
-    /// Last deposit time per account (for cooldown)
+    // Last deposit time per account (for cooldown)
     last_deposit: HashMap<AccountId, u64>,
-    /// Total deposits processed
+    // Total deposits processed
     total_deposited: Decimal,
-    /// Total withdrawals processed
+    // Total withdrawals processed
     total_withdrawn: Decimal,
 }
 
@@ -244,7 +239,7 @@ impl CustodyManager {
         }
     }
 
-    /// Initiate a deposit (called when funds arrive)
+    // Initiate a deposit (called when funds arrive)
     pub fn initiate_deposit(&mut self, request: DepositRequest) -> Result<(), CustodyError> {
         // check minimum deposit
         if let Some(min) = self.config.min_deposits.get(&request.collateral_type) {
@@ -257,7 +252,7 @@ impl CustodyManager {
         Ok(())
     }
 
-    /// Confirm a deposit (called after sufficient confirmations)
+    // Confirm a deposit (called after sufficient confirmations)
     pub fn confirm_deposit(&mut self, tx_id: &TxId, timestamp: u64) -> Result<DepositRequest, CustodyError> {
         let deposit = self.pending_deposits.remove(tx_id)
             .ok_or_else(|| CustodyError::TransferNotFound { tx_id: tx_id.clone() })?;
@@ -276,7 +271,7 @@ impl CustodyManager {
         Ok(confirmed)
     }
 
-    /// Request a withdrawal
+    // Request a withdrawal
     pub fn request_withdrawal(
         &mut self,
         account_id: AccountId,
@@ -323,7 +318,7 @@ impl CustodyManager {
         Ok(request)
     }
 
-    /// Process a pending withdrawal (called by settlement layer)
+    // Process a pending withdrawal (called by settlement layer)
     pub fn process_withdrawal(&mut self, tx_id: &TxId, timestamp: u64) -> Result<WithdrawalRequest, CustodyError> {
         let withdrawal = self.pending_withdrawals.remove(tx_id)
             .ok_or_else(|| CustodyError::TransferNotFound { tx_id: tx_id.clone() })?;
@@ -337,7 +332,7 @@ impl CustodyManager {
         Ok(processed)
     }
 
-    /// Cancel a pending withdrawal
+    // Cancel a pending withdrawal
     pub fn cancel_withdrawal(&mut self, tx_id: &TxId) -> Result<WithdrawalRequest, CustodyError> {
         let mut withdrawal = self.pending_withdrawals.remove(tx_id)
             .ok_or_else(|| CustodyError::TransferNotFound { tx_id: tx_id.clone() })?;
@@ -346,14 +341,14 @@ impl CustodyManager {
         Ok(withdrawal)
     }
 
-    /// Get pending deposits for an account
+    // Get pending deposits for an account
     pub fn pending_deposits_for(&self, account_id: AccountId) -> Vec<&DepositRequest> {
         self.pending_deposits.values()
             .filter(|d| d.account_id == account_id)
             .collect()
     }
 
-    /// Get pending withdrawals for an account
+    // Get pending withdrawals for an account
     pub fn pending_withdrawals_for(&self, account_id: AccountId) -> Vec<&WithdrawalRequest> {
         self.pending_withdrawals.values()
             .filter(|w| w.account_id == account_id)
@@ -377,19 +372,19 @@ impl CustodyManager {
     }
 }
 
-/// Trait for settlement adapters. Implement this for different chains/systems.
+// Trait for settlement adapters. Implement this for different chains/systems.
 pub trait SettlementAdapter {
-    /// Check if a deposit transaction exists and get its confirmation count
+    // Check if a deposit transaction exists and get its confirmation count
     fn check_deposit(&self, tx_id: &TxId) -> Option<(Decimal, u32)>;
 
-    /// Submit a withdrawal transaction
+    // Submit a withdrawal transaction
     fn submit_withdrawal(&mut self, request: &WithdrawalRequest) -> Result<TxId, CustodyError>;
 
-    /// Check withdrawal transaction status
+    // Check withdrawal transaction status
     fn check_withdrawal(&self, tx_id: &TxId) -> Option<TransferStatus>;
 }
 
-/// Mock settlement for testing
+// Mock settlement for testing
 pub struct MockSettlement {
     deposits: HashMap<TxId, (Decimal, u32)>,
     withdrawals: HashMap<TxId, TransferStatus>,

@@ -1,18 +1,27 @@
-//! Perpetual DEX Core Engine.
-//!
-//! Risk first architecture for perpetual futures trading. Margin math and
-//! liquidation logic take priority over liquidity concerns. All computation
-//! is deterministic and pure with no external I/O dependencies.
-//!
-//! Core components include order book matching, market state management,
-//! position tracking with isolated margin, funding rate settlement,
-//! and liquidation detection.
-//!
-//! Additions: circuit breakers, auto deleveraging, stop loss and take
-//! profit orders, comprehensive stress testing, and solvency invariants.
-//! API service layer, price feed integration, liquidity
-//! abstractions, custody and deposit/withdrawal flows, settlement layer,
-//! and unified configuration management.
+// perps-core: perpetual futures trading engine.
+// risk-first architecture: margin math and liquidation take priority.
+// all computation is deterministic with no external I/O.
+//
+// file map (search X.0 for structs, X.1+ for logic):
+//   1.x  types.rs: primitives: MarketId, Side, Price, Quote, Leverage
+//   2.x  order.rs: CLOB order book and matching engine
+//   2.1x conditional.rs: stop loss, take profit, trailing stops, OCO
+//   3.x  margin.rs: IM/MM calculation, leverage tiers
+//   4.x  position.rs: position struct, PnL, increase/reduce/flip
+//   5.x  funding.rs: 8-hour funding cycle, premium index
+//   6.x  liquidation.rs: liquidation detection, penalty, insurance
+//   6.2  adl.rs: auto-deleveraging when insurance empty
+//   6.3  risk.rs: circuit breakers, position/OI limits
+//   7.x  config.rs: fees, margins, risk params, env presets
+//   8.x  engine/: core engine: orders, positions, funding, liquidations
+//   9.x  price_feed.rs: oracle aggregation (mocked)
+//   9.1  settlement.rs: settlement batching (mocked)
+//   9.2  custody.rs: deposit/withdraw flows (mocked)
+//   9.3  liquidity.rs: LP pool abstraction (mocked)
+//   10.x account.rs: account + collateral management
+//   11.x events.rs: state transition events for audit
+//   12.x market.rs: market config + runtime state
+//   13.x mark_price.rs: blended mark price derivation
 
 // core trading modules
 pub mod account;

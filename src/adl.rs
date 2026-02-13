@@ -1,8 +1,5 @@
-//! Auto-deleveraging system.
-//!
-//! When the insurance fund cannot cover bad debt from a liquidation, the system
-//! must deleverage profitable traders on the opposite side. This socializes losses
-//! fairly based on profit and leverage, ensuring the exchange remains solvent.
+// 6.2: auto-deleveraging. when insurance fund is empty, profitable traders get force-closed.
+// ranked by pnl * leverage score: highest score gets deleveraged first.
 
 use crate::position::Position;
 use crate::types::{AccountId, MarketId, Price, Quote, Side};
@@ -11,13 +8,10 @@ use rust_decimal_macros::dec;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 
-/// Parameters controlling the ADL system.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AdlParams {
-    /// Minimum uncovered bad debt to trigger ADL.
-    pub min_trigger_amount: Quote,
-    /// Maximum accounts to deleverage in single operation.
-    pub max_accounts_per_round: usize,
+    pub min_trigger_amount: Quote,      // min bad debt to trigger ADL
+    pub max_accounts_per_round: usize,  // cap per ADL round
 }
 
 impl Default for AdlParams {
@@ -29,14 +23,11 @@ impl Default for AdlParams {
     }
 }
 
-/// A position ranked for potential auto-deleveraging.
 #[derive(Debug, Clone)]
 pub struct AdlCandidate {
     pub account_id: AccountId,
     pub position: Position,
-    /// Ranking score, higher means deleveraged first.
-    pub score: Decimal,
-    /// Unrealized PnL at current mark price.
+    pub score: Decimal,          // higher = deleveraged first
     pub unrealized_pnl: Quote,
 }
 
@@ -79,8 +70,7 @@ impl Ord for AdlCandidate {
     }
 }
 
-/// Calculates the ADL priority score for a position.
-/// Higher scores are deleveraged first. Score considers both PnL and leverage.
+// score = pnl_ratio * leverage. profitable high-leverage positions get deleveraged first.
 fn calculate_adl_score(position: &Position, unrealized_pnl: Quote) -> Decimal {
     let pnl_ratio = if position.collateral.value().is_zero() {
         Decimal::ZERO
@@ -94,21 +84,15 @@ fn calculate_adl_score(position: &Position, unrealized_pnl: Quote) -> Decimal {
     pnl_ratio * leverage
 }
 
-/// Result of an ADL operation.
 #[derive(Debug, Clone)]
 pub struct AdlResult {
     pub market_id: MarketId,
-    /// The bankrupt position that triggered ADL.
     pub bankrupt_account: AccountId,
-    /// The uncovered bad debt amount.
     pub bad_debt: Quote,
-    /// Positions that were deleveraged.
     pub deleveraged: Vec<AdlExecution>,
-    /// Any remaining uncovered debt (should be zero if successful).
-    pub remaining_debt: Quote,
+    pub remaining_debt: Quote,  // should be zero if successful
 }
 
-/// Details of a single ADL execution.
 #[derive(Debug, Clone)]
 pub struct AdlExecution {
     pub account_id: AccountId,
@@ -117,8 +101,7 @@ pub struct AdlExecution {
     pub realized_pnl: Quote,
 }
 
-/// Builds the ranked list of ADL candidates for a given side.
-/// Returns positions sorted by deleveraging priority (highest first).
+// builds ranked list of ADL candidates. sorted by priority, highest first.
 pub fn rank_adl_candidates(
     positions: Vec<(AccountId, Position)>,
     target_side: Side,
@@ -136,7 +119,7 @@ pub fn rank_adl_candidates(
     candidates
 }
 
-/// Determines how much size to deleverage from each candidate to cover bad debt.
+// determines how much to close from each candidate to cover the bad debt
 pub fn calculate_adl_sizes(
     candidates: &[AdlCandidate],
     bad_debt: Quote,
@@ -176,7 +159,6 @@ pub fn calculate_adl_sizes(
     results
 }
 
-/// Checks if ADL should be triggered based on uncovered bad debt.
 pub fn should_trigger_adl(uncovered_debt: Quote, params: &AdlParams) -> bool {
     uncovered_debt.value() >= params.min_trigger_amount.value()
 }

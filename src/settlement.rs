@@ -1,9 +1,4 @@
-// Settlement Layer Abstraction
-//
-// This module bridges the trading engine with external settlement systems.
-// Settlement can happen on chain (Solana, EVM), through a centralized clearing house,
-// or in a hybrid model. The engine produces settlement instructions, and adapters
-// execute them against the appropriate backend.
+// 9.1 settlement.rs: MOCKED. in-memory, would be blockchain txs in prod.
 
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -11,14 +6,14 @@ use std::collections::VecDeque;
 
 use crate::types::AccountId;
 
-/// Unique identifier for a settlement batch
+// Unique identifier for a settlement batch
 pub type BatchId = u64;
 
-/// Types of settlements the engine can produce
+// Types of settlements the engine can produce
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SettlementInstruction {
-    /// Transfer collateral between accounts (internal)
+    // Transfer collateral between accounts (internal)
     Transfer {
         from: AccountId,
         to: AccountId,
@@ -26,35 +21,35 @@ pub enum SettlementInstruction {
         reason: TransferReason,
     },
 
-    /// Credit an account (deposit finalized)
+    // Credit an account (deposit finalized)
     Credit {
         account_id: AccountId,
         amount: Decimal,
         source: String,
     },
 
-    /// Debit an account (withdrawal initiated)
+    // Debit an account (withdrawal initiated)
     Debit {
         account_id: AccountId,
         amount: Decimal,
         destination: String,
     },
 
-    /// Realize PnL from a closed position
+    // Realize PnL from a closed position
     RealizePnl {
         account_id: AccountId,
         pnl: Decimal,
         counterparty: AccountId,
     },
 
-    /// Settle funding payment
+    // Settle funding payment
     FundingPayment {
         payer: AccountId,
         receiver: AccountId,
         amount: Decimal,
     },
 
-    /// Liquidation settlement
+    // Liquidation settlement
     Liquidation {
         liquidated: AccountId,
         liquidator: AccountId,
@@ -62,20 +57,20 @@ pub enum SettlementInstruction {
         penalty: Decimal,
     },
 
-    /// Insurance fund contribution
+    // Insurance fund contribution
     InsuranceContribution {
         from: AccountId,
         amount: Decimal,
     },
 
-    /// Insurance fund payout (to cover bad debt)
+    // Insurance fund payout (to cover bad debt)
     InsurancePayout {
         to: AccountId,
         amount: Decimal,
     },
 }
 
-/// Why a transfer is happening
+// Why a transfer is happening
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TransferReason {
@@ -87,7 +82,7 @@ pub enum TransferReason {
     Referral,
 }
 
-/// Status of a settlement batch
+// Status of a settlement batch
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BatchStatus {
@@ -98,7 +93,7 @@ pub enum BatchStatus {
     Reverted,
 }
 
-/// A batch of settlement instructions to be executed atomically
+// A batch of settlement instructions to be executed atomically
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SettlementBatch {
     pub batch_id: BatchId,
@@ -106,7 +101,7 @@ pub struct SettlementBatch {
     pub status: BatchStatus,
     pub created_at: u64,
     pub processed_at: Option<u64>,
-    /// Hash or signature for verification
+    // Hash or signature for verification
     pub commitment: Option<String>,
 }
 
@@ -134,7 +129,7 @@ impl SettlementBatch {
         self.instructions.len()
     }
 
-    /// Calculate net flows per account for validation
+    // Calculate net flows per account for validation
     pub fn net_flows(&self) -> std::collections::HashMap<AccountId, Decimal> {
         let mut flows = std::collections::HashMap::new();
 
@@ -175,7 +170,7 @@ impl SettlementBatch {
     }
 }
 
-/// Errors from settlement operations
+// Errors from settlement operations
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SettlementError {
     BatchNotFound { batch_id: BatchId },
@@ -186,17 +181,17 @@ pub enum SettlementError {
     NetworkError { message: String },
 }
 
-/// Manages settlement batching and execution
+// Manages settlement batching and execution
 #[derive(Debug)]
 pub struct SettlementManager {
     next_batch_id: BatchId,
-    /// Current batch being built
+    // Current batch being built
     current_batch: Option<SettlementBatch>,
-    /// Pending batches awaiting execution
+    // Pending batches awaiting execution
     pending_batches: VecDeque<SettlementBatch>,
-    /// Completed batches (for audit trail)
+    // Completed batches (for audit trail)
     completed_batches: Vec<SettlementBatch>,
-    /// Maximum instructions per batch
+    // Maximum instructions per batch
     max_batch_size: usize,
 }
 
@@ -211,7 +206,7 @@ impl SettlementManager {
         }
     }
 
-    /// Start a new settlement batch
+    // Start a new settlement batch
     pub fn begin_batch(&mut self, timestamp: u64) -> BatchId {
         let batch_id = self.next_batch_id;
         self.next_batch_id += 1;
@@ -219,7 +214,7 @@ impl SettlementManager {
         batch_id
     }
 
-    /// Add an instruction to the current batch
+    // Add an instruction to the current batch
     pub fn add_instruction(&mut self, instruction: SettlementInstruction) -> Result<(), SettlementError> {
         let batch = self.current_batch.as_mut()
             .ok_or_else(|| SettlementError::InvalidInstruction {
@@ -236,7 +231,7 @@ impl SettlementManager {
         Ok(())
     }
 
-    /// Finalize the current batch and queue for execution
+    // Finalize the current batch and queue for execution
     pub fn commit_batch(&mut self) -> Result<BatchId, SettlementError> {
         let batch = self.current_batch.take()
             .ok_or_else(|| SettlementError::InvalidInstruction {
@@ -254,24 +249,24 @@ impl SettlementManager {
         Ok(batch_id)
     }
 
-    /// Abort the current batch without committing
+    // Abort the current batch without committing
     pub fn abort_batch(&mut self) {
         self.current_batch = None;
     }
 
-    /// Get the next pending batch for execution
+    // Get the next pending batch for execution
     pub fn next_pending(&mut self) -> Option<SettlementBatch> {
         self.pending_batches.pop_front()
     }
 
-    /// Mark a batch as completed
+    // Mark a batch as completed
     pub fn mark_completed(&mut self, mut batch: SettlementBatch, timestamp: u64) {
         batch.status = BatchStatus::Committed;
         batch.processed_at = Some(timestamp);
         self.completed_batches.push(batch);
     }
 
-    /// Mark a batch as failed
+    // Mark a batch as failed
     pub fn mark_failed(&mut self, mut batch: SettlementBatch) {
         batch.status = BatchStatus::Failed;
         self.completed_batches.push(batch);
@@ -290,19 +285,19 @@ impl SettlementManager {
     }
 }
 
-/// Trait for settlement execution backends
+// Trait for settlement execution backends
 pub trait SettlementBackend {
-    /// Execute a settlement batch
+    // Execute a settlement batch
     fn execute(&mut self, batch: &SettlementBatch) -> Result<String, SettlementError>;
 
-    /// Check the status of a previously submitted batch
+    // Check the status of a previously submitted batch
     fn check_status(&self, commitment: &str) -> BatchStatus;
 
-    /// Get the backend type identifier
+    // Get the backend type identifier
     fn backend_type(&self) -> &str;
 }
 
-/// In memory settlement backend for testing and simulation
+// In memory settlement backend for testing and simulation
 pub struct InMemorySettlement {
     balances: std::collections::HashMap<AccountId, Decimal>,
     executed_batches: Vec<String>,
@@ -370,16 +365,16 @@ impl SettlementBackend for InMemorySettlement {
     }
 }
 
-/// Settlement configuration
+// Settlement configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SettlementConfig {
-    /// Maximum instructions per batch
+    // Maximum instructions per batch
     pub max_batch_size: usize,
-    /// How often to flush batches (in seconds)
+    // How often to flush batches (in seconds)
     pub flush_interval: u64,
-    /// Minimum batch size before auto flush
+    // Minimum batch size before auto flush
     pub min_batch_size: usize,
-    /// Whether to validate balances before settlement
+    // Whether to validate balances before settlement
     pub pre_validate: bool,
 }
 

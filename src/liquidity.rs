@@ -1,32 +1,25 @@
-// Liquidity Interface Layer
-//
-// This module abstracts liquidity sources for the perps engine. The engine can pull
-// liquidity from various sources: on chain AMMs, external market makers, LP vaults,
-// or hybrid approaches like GMX's GLP or Hyperliquid's HLP.
-//
-// The core engine remains agnostic to where liquidity comes from. These interfaces
-// allow plugging in different liquidity models without changing the matching logic.
+// 9.3 liquidity.rs: pool code exists but not connected. we use order book not AMM.
 
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
 use crate::types::{AccountId, Side};
 
-/// Unique identifier for a liquidity pool
+// Unique identifier for a liquidity pool
 pub type PoolId = u32;
 
-/// Configuration for a liquidity pool
+// Configuration for a liquidity pool
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PoolConfig {
     pub pool_id: PoolId,
     pub name: String,
-    /// Total value locked in the pool
+    // Total value locked in the pool
     pub tvl: Decimal,
-    /// Maximum utilization ratio (e.g. 0.8 = 80% can be used for positions)
+    // Maximum utilization ratio (e.g. 0.8 = 80% can be used for positions)
     pub max_utilization: Decimal,
-    /// Fee tier in basis points
+    // Fee tier in basis points
     pub fee_bps: u32,
-    /// Whether this pool is currently active
+    // Whether this pool is currently active
     pub active: bool,
 }
 
@@ -43,18 +36,18 @@ impl Default for PoolConfig {
     }
 }
 
-/// Represents a quote from a liquidity source
+// Represents a quote from a liquidity source
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LiquidityQuote {
     pub source_id: PoolId,
     pub side: Side,
     pub size: Decimal,
     pub price: Decimal,
-    /// Fee to execute this quote
+    // Fee to execute this quote
     pub fee: Decimal,
-    /// Price impact of this trade
+    // Price impact of this trade
     pub price_impact: Decimal,
-    /// How long this quote is valid (in seconds)
+    // How long this quote is valid (in seconds)
     pub valid_for_seconds: u64,
     pub timestamp: u64,
 }
@@ -69,7 +62,7 @@ impl LiquidityQuote {
     }
 }
 
-/// Errors from liquidity operations
+// Errors from liquidity operations
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LiquidityError {
     InsufficientLiquidity { requested: Decimal, available: Decimal },
@@ -80,38 +73,38 @@ pub enum LiquidityError {
     UtilizationExceeded { current: Decimal, max: Decimal },
 }
 
-/// Trait for liquidity providers. Different implementations can model:
-/// - GLP style shared pool (like GMX)
-/// - HLP style vault (like Hyperliquid)
-/// - External market maker connections
-/// - On chain AMM integration
+// Trait for liquidity providers. Different implementations can model:
+// - GLP style shared pool (like GMX)
+// - HLP style vault (like Hyperliquid)
+// - External market maker connections
+// - On chain AMM integration
 pub trait LiquidityProvider {
     fn pool_id(&self) -> PoolId;
     fn name(&self) -> &str;
 
-    /// Get a quote for a given trade
+    // Get a quote for a given trade
     fn get_quote(&self, side: Side, size: Decimal, current_price: Decimal) -> Result<LiquidityQuote, LiquidityError>;
 
-    /// Execute against a quote (would mutate state in real implementation)
+    // Execute against a quote (would mutate state in real implementation)
     fn execute_quote(&mut self, quote: &LiquidityQuote) -> Result<(), LiquidityError>;
 
-    /// Current available liquidity on each side
+    // Current available liquidity on each side
     fn available_liquidity(&self) -> (Decimal, Decimal); // (long, short)
 
-    /// Current utilization ratio
+    // Current utilization ratio
     fn utilization(&self) -> Decimal;
 }
 
-/// A simple shared liquidity pool similar to GMX's GLP model.
-/// LPs deposit collateral, traders trade against the pool.
+// A simple shared liquidity pool similar to GMX's GLP model.
+// LPs deposit collateral, traders trade against the pool.
 #[derive(Debug, Clone)]
 pub struct SharedPool {
     config: PoolConfig,
-    /// Total long open interest against this pool
+    // Total long open interest against this pool
     long_oi: Decimal,
-    /// Total short open interest against this pool
+    // Total short open interest against this pool
     short_oi: Decimal,
-    /// Accumulated fees
+    // Accumulated fees
     accumulated_fees: Decimal,
 }
 
@@ -235,11 +228,11 @@ impl LiquidityProvider for SharedPool {
     }
 }
 
-/// Aggregates multiple liquidity sources and routes orders optimally
+// Aggregates multiple liquidity sources and routes orders optimally
 #[derive(Debug)]
 pub struct LiquidityRouter {
     pools: Vec<Box<dyn LiquidityProvider + Send + Sync>>,
-    /// Maximum allowed price impact
+    // Maximum allowed price impact
     max_price_impact: Decimal,
 }
 
@@ -262,7 +255,7 @@ impl LiquidityRouter {
         self.pools.push(pool);
     }
 
-    /// Get the best quote across all pools
+    // Get the best quote across all pools
     pub fn get_best_quote(&self, side: Side, size: Decimal, current_price: Decimal) -> Result<LiquidityQuote, LiquidityError> {
         let mut best_quote: Option<LiquidityQuote> = None;
 
@@ -295,7 +288,7 @@ impl LiquidityRouter {
         })
     }
 
-    /// Get aggregate liquidity across all pools
+    // Get aggregate liquidity across all pools
     pub fn total_liquidity(&self) -> (Decimal, Decimal) {
         let mut total_long = Decimal::ZERO;
         let mut total_short = Decimal::ZERO;
@@ -314,16 +307,16 @@ impl LiquidityRouter {
     }
 }
 
-/// LP position in a shared pool
+// LP position in a shared pool
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LpPosition {
     pub account_id: AccountId,
     pub pool_id: PoolId,
-    /// Share of the pool (like LP tokens)
+    // Share of the pool (like LP tokens)
     pub shares: Decimal,
-    /// Value at time of deposit
+    // Value at time of deposit
     pub deposited_value: Decimal,
-    /// Timestamp of deposit
+    // Timestamp of deposit
     pub deposit_time: u64,
 }
 
@@ -338,12 +331,12 @@ impl LpPosition {
         }
     }
 
-    /// Calculate current value based on pool's share price
+    // Calculate current value based on pool's share price
     pub fn current_value(&self, pool_share_price: Decimal) -> Decimal {
         self.shares * pool_share_price
     }
 
-    /// Calculate PnL
+    // Calculate PnL
     pub fn pnl(&self, pool_share_price: Decimal) -> Decimal {
         self.current_value(pool_share_price) - self.deposited_value
     }
