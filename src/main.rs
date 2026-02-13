@@ -1,11 +1,6 @@
-//! Perpetual DEX Core Simulation.
-//!
-//! Demonstrates the full trading engine lifecycle including order matching,
-//! position tracking, funding settlement, and liquidation cascades.
-//!
-//! Adds demonstrations for risk management, circuit breakers,
-//! auto deleveraging, and conditional orders. also adds integration layer demos: price feeds, liquidity pools,
-//! custody flows, and settlement batching.
+// main simulation. demonstrates the full engine lifecycle:
+// order matching, position tracking, funding, liquidation,
+// circuit breakers, ADL, conditional orders, and integration stubs.
 
 use perps_core::*;
 use perps_core::api::{EngineCommand, validate_command};
@@ -17,6 +12,17 @@ use perps_core::settlement::{SettlementManager, SettlementInstruction, TransferR
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
+// todo: perps position needs to be hedged with physical asset behind it. if needs to be done how are we hedging
+
+// todo: leverage should be dynamic based on market pool size. ex: not enough buy/sell orders, liquidation side
+// todo: orderbook can fluctuate 10% within candle and leveraging and swing means 8x in position, then user closes and closes on market side needs to be consumed
+// if position on other end over liquated then needs to be liquidated and someone needs to consume whole liquidation.
+
+// todo: gRPC protos - read docs on this and implement and create websockets for events
+// todo: check comment on remaining for orders on partially filled and how that works
+
+// todo: postman.json to be generated on input/output collect events through endpoints etc. create docs for event types to be emitted
+// todo: implement withdraw/deposit microservice, transform this repo to workspace aka add diff services, blockchain service to read deposits and build balance ledger(users, orders, trade history, etc)
 fn main() {
     println!("Perpetual DEX Core Engine Simulation");
     println!("Single Market, Isolated Margin, Full Lifecycle\n");
@@ -47,7 +53,7 @@ fn main() {
     println!("\nAll simulations completed successfully.");
 }
 
-/// Basic order matching between two traders.
+// Basic order matching between two traders.
 fn scenario_1_basic_trading() {
     println!("Scenario 1: Basic Order Matching\n");
 
@@ -87,7 +93,7 @@ fn scenario_1_basic_trading() {
     println!("  Open interest: {} long, {} short\n", market.open_interest_long, market.open_interest_short);
 }
 
-/// Order book depth with multiple market makers.
+// Order book depth with multiple market makers.
 fn scenario_2_multiple_traders() {
     println!("Scenario 2: Order Book Depth\n");
 
@@ -120,7 +126,7 @@ fn scenario_2_multiple_traders() {
     println!("  Filled {} BTC across {} fills\n", result.filled_size, result.fills.len());
 }
 
-/// Position lifecycle from open to close.
+// Position lifecycle from open to close.
 fn scenario_3_position_lifecycle() {
     println!("Scenario 3: Position Lifecycle\n");
 
@@ -157,7 +163,7 @@ fn scenario_3_position_lifecycle() {
     println!("  Position closed, balance: ${}, realized PnL: ${}\n", account.balance, account.realized_pnl);
 }
 
-/// Price movements and unrealized PnL tracking.
+// Price movements and unrealized PnL tracking.
 fn scenario_4_price_movement_and_pnl() {
     println!("Scenario 4: Price Movement and PnL\n");
 
@@ -201,7 +207,7 @@ fn print_pnl(engine: &Engine, long_id: AccountId, short_id: AccountId) {
     println!("    Long PnL: ${}, Short PnL: ${}", long_pnl, short_pnl);
 }
 
-/// Funding rate settlement between longs and shorts.
+// Funding rate settlement between longs and shorts.
 fn scenario_5_funding_settlement() {
     println!("Scenario 5: Funding Settlement\n");
 
@@ -233,7 +239,7 @@ fn scenario_5_funding_settlement() {
     println!("  Funding rate: {:.6}%, {} accounts affected\n", result.funding_rate * dec!(100), result.accounts_affected);
 }
 
-/// Liquidation cascade from price crash.
+// Liquidation cascade from price crash.
 fn scenario_6_liquidation_cascade() {
     println!("Scenario 6: Liquidation Cascade\n");
 
@@ -280,7 +286,7 @@ fn scenario_6_liquidation_cascade() {
     println!("  Insurance fund: ${}\n", engine.insurance_fund_balance());
 }
 
-/// Stress test with many traders and volatile prices.
+// Stress test with many traders and volatile prices.
 fn scenario_7_stress_test() {
     println!("Scenario 7: Stress Test\n");
 
@@ -349,7 +355,7 @@ fn scenario_7_stress_test() {
     println!("  Events generated: {}\n", engine.events().len());
 }
 
-/// Circuit breaker demonstration.
+// Circuit breaker demonstration.
 fn scenario_8_circuit_breakers() {
     println!("Scenario 8: Circuit Breakers\n");
 
@@ -388,7 +394,7 @@ fn scenario_8_circuit_breakers() {
     println!("  Position of $6M with $50M OI (12%): {:?}\n", position_result);
 }
 
-/// Conditional order demonstration (stop loss, take profit).
+// Conditional order demonstration (stop loss, take profit).
 fn scenario_9_conditional_orders() {
     println!("Scenario 9: Conditional Orders\n");
 
@@ -442,7 +448,7 @@ fn scenario_9_conditional_orders() {
     let _ = (stop_id, tp_id); // Silence unused warnings
 }
 
-/// ADL ranking demonstration.
+// ADL ranking demonstration.
 fn scenario_10_adl_ranking() {
     println!("Scenario 10: ADL Ranking\n");
 
@@ -480,7 +486,7 @@ fn scenario_10_adl_ranking() {
     println!();
 }
 
-/// Near margin boundary edge cases.
+// Near margin boundary edge cases.
 fn scenario_11_near_margin_edge() {
     println!("Scenario 11: Near Margin Edge Cases\n");
 
@@ -549,7 +555,7 @@ fn scenario_11_near_margin_edge() {
     println!();
 }
 
-/// Helper to create test position for ADL demo.
+// Helper to create test position for ADL demo.
 fn create_test_position(
     account_id: u64,
     market_id: MarketId,
@@ -576,7 +582,7 @@ fn create_test_position(
     (AccountId(account_id), pos)
 }
 
-/// Price feed aggregation from multiple sources.
+// Price feed aggregation from multiple sources.
 fn scenario_12_price_aggregation() {
     println!("Scenario 12: Price Feed Aggregation\n");
 
@@ -613,7 +619,7 @@ fn scenario_12_price_aggregation() {
     println!("  TWAP over 4 samples: ${}\n", twap.get_twap().unwrap());
 }
 
-/// Shared liquidity pool operations.
+// Shared liquidity pool operations.
 fn scenario_13_liquidity_pool() {
     println!("Scenario 13: Liquidity Pool\n");
 
@@ -649,7 +655,7 @@ fn scenario_13_liquidity_pool() {
     let _ = short_liq;
 }
 
-/// Deposit and withdrawal custody flows.
+// Deposit and withdrawal custody flows.
 fn scenario_14_custody_flows() {
     println!("Scenario 14: Custody Flows\n");
 
@@ -690,7 +696,7 @@ fn scenario_14_custody_flows() {
     println!("  Total withdrawn: ${}\n", custody.total_withdrawn());
 }
 
-/// Settlement batch processing.
+// Settlement batch processing.
 fn scenario_15_settlement_batching() {
     println!("Scenario 15: Settlement Batching\n");
 
@@ -739,7 +745,7 @@ fn scenario_15_settlement_batching() {
     println!("    Account 3: ${} (was $8,000)\n", backend.get_balance(AccountId(3)));
 }
 
-/// Configuration presets for different environments.
+// Configuration presets for different environments.
 fn scenario_16_config_presets() {
     println!("Scenario 16: Configuration Presets\n");
 
