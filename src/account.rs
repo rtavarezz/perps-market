@@ -1,7 +1,5 @@
-//! Account and collateral management.
-//!
-//! Accounts hold trading collateral with isolated margin where each position has
-//! its own collateral and risk is isolated between positions.
+// 10.0: account and collateral management. isolated margin means each position has its own collateral.
+// 10.1 has deposit/withdraw/fee logic. withdrawals blocked with open positions.
 
 use crate::margin::{calculate_margin_requirement, MarginParams};
 use crate::position::Position;
@@ -19,6 +17,9 @@ pub struct Account {
     pub total_withdrawn: Quote,
     pub realized_pnl: Quote,
     pub created_at: Timestamp,
+    pub referrer: Option<AccountId>,        // earns a cut of this account's fees
+    pub trading_volume_30d: Decimal,         // for fee tier calculation
+    pub total_fees_paid: Quote,
 }
 
 impl Account {
@@ -31,6 +32,9 @@ impl Account {
             total_withdrawn: Quote::zero(),
             realized_pnl: Quote::zero(),
             created_at: timestamp,
+            referrer: None,
+            trading_volume_30d: Decimal::ZERO,
+            total_fees_paid: Quote::zero(),
         }
     }
 
@@ -39,7 +43,13 @@ impl Account {
         self.total_deposited = self.total_deposited.add(amount);
     }
 
+    // 10.1: withdraw. blocked if positions are open
     pub fn withdraw(&mut self, amount: Quote) -> Result<(), AccountError> {
+        if self.has_open_positions() {
+            return Err(AccountError::WithdrawalLocked {
+                reason: "close all positions before withdrawing".to_string(),
+            });
+        }
         if amount.value() > self.balance.value() {
             return Err(AccountError::InsufficientBalance {
                 requested: amount,
@@ -49,6 +59,33 @@ impl Account {
         self.balance = self.balance.sub(amount);
         self.total_withdrawn = self.total_withdrawn.add(amount);
         Ok(())
+    }
+
+    pub fn has_open_positions(&self) -> bool {
+        !self.positions.is_empty()
+    }
+
+    // zero if positions open, must close everything to withdraw
+    pub fn available_balance(&self) -> Quote {
+        if self.has_open_positions() {
+            Quote::zero()
+        } else {
+            self.balance
+        }
+    }
+
+    // free collateral for new positions
+    pub fn free_collateral(&self) -> Quote {
+        self.balance
+    }
+
+    pub fn deduct_fee(&mut self, fee: Quote) {
+        self.balance = self.balance.sub(fee);
+        self.total_fees_paid = self.total_fees_paid.add(fee);
+    }
+
+    pub fn set_referrer(&mut self, referrer_id: AccountId) {
+        self.referrer = Some(referrer_id);
     }
 
     pub fn get_position(&self, market_id: MarketId) -> Option<&Position> {
@@ -175,6 +212,9 @@ pub enum AccountError {
 
     #[error("Account is liquidatable")]
     Liquidatable,
+
+    #[error("Withdrawal locked: {reason}")]
+    WithdrawalLocked { reason: String },
 }
 
 #[cfg(test)]
